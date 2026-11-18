@@ -26,15 +26,18 @@ using DWORD=std::uint32_t;
 #define __cdecl
 #endif
 struct OBJECT{char bytes[444];};
-struct CHARACTER;struct PART_t;
+struct CHARACTER{OBJECT Object;char beforeKey[32];unsigned short Key;char tail[438];};struct PART_t;
 CHARACTER* AsCharacter(void* p){return reinterpret_cast<CHARACTER*>(p);}
 OBJECT* AsObject(void* p){return static_cast<OBJECT*>(p);}
 struct JOINT{unsigned char Live;int Type,SubType;OBJECT* Target;};
-JOINT DAT_07b27150[500];
+constexpr int kJointPoolSize=500;
+JOINT Joints[kJointPoolSize];
 JOINT* AsJoint(JOINT* p){return p;}
 char entities[0x59740],butterflies[0x1158];
-std::uintptr_t DAT_07abf5d0=reinterpret_cast<std::uintptr_t>(entities);
+std::uintptr_t CharactersClient=reinterpret_cast<std::uintptr_t>(entities);
 char* DAT_083a1218=butterflies;
+// Nombre nuevo del pool (T9f) sobre el mismo buffer; el viejo queda para las revisiones anteriores.
+#define Butterfles (reinterpret_cast<OBJECT*>(DAT_083a1218))
 struct Service{void Clear(){}void Close(){}void Reset(){}}gHealthBar,gMoveList,gEventTimer,gChaosMixRates;
 void GoldenArcher_ResetCharacter(){}void Party_RefreshViewportLinks(){}
 void DeleteCloth(int,int,int){}
@@ -48,17 +51,17 @@ int main(){
   std::memset(entities,0,sizeof(entities));std::memset(butterflies,0,sizeof(butterflies));
   char* previous=entities;char* kept=entities+916;
   previous[0]=!dead;kept[0]=1;PutKey(previous,9000);PutKey(kept,9001);
-  for(int i=0;i<5;++i)DAT_07b27150[i]={1,266,0,reinterpret_cast<OBJECT*>(previous)};
-  DAT_07b27150[5]={1,266,0,reinterpret_cast<OBJECT*>(kept)};
-  DAT_07b27150[6]={1,266,4,reinterpret_cast<OBJECT*>(previous)};
-  DAT_07b27150[7]={1,1254,0,reinterpret_cast<OBJECT*>(previous)};
-  DAT_07b27150[8]={0,266,0,reinterpret_cast<OBJECT*>(previous)};
+  for(int i=0;i<5;++i)Joints[i]={1,266,0,reinterpret_cast<OBJECT*>(previous)};
+  Joints[5]={1,266,0,reinterpret_cast<OBJECT*>(kept)};
+  Joints[6]={1,266,4,reinterpret_cast<OBJECT*>(previous)};
+  Joints[7]={1,1254,0,reinterpret_cast<OBJECT*>(previous)};
+  Joints[8]={0,266,0,reinterpret_cast<OBJECT*>(previous)};
   ClearCharacters(preserve?9001:-1);
   // La lista de selección reutiliza inmediatamente la dirección del personaje.
   previous[0]=1;PutKey(previous,0);
-  for(int i=0;i<5;++i)Require(!DAT_07b27150[i].Live);
-  Require(DAT_07b27150[5].Live==preserve);
-  Require(DAT_07b27150[6].Live&&DAT_07b27150[7].Live&&!DAT_07b27150[8].Live);
+  for(int i=0;i<5;++i)Require(!Joints[i].Live);
+  Require(Joints[5].Live==preserve);
+  Require(Joints[6].Live&&Joints[7].Live&&!Joints[8].Live);
   Require(kept[0]==preserve);
  }
  std::puts("PASS: slot vivo/inactivo, selección inmediata y dueño preservado; sin transferencia de Mana Shield");
@@ -66,8 +69,8 @@ int main(){
 '''
 parser=argparse.ArgumentParser();parser.add_argument('--architecture',choices=['Win32','x64'],default='Win32');parser.add_argument('--revision');args=parser.parse_args()
 def read(path):
-    return subprocess.check_output(['git','show',args.revision+':'+path],cwd=ROOT).decode('utf-8') if args.revision else (ROOT/path).read_text(encoding='utf-8')
-code=code.replace('DELETE',function(read('src/Entity/Entity_LegacyTeleport.cpp'),'DeleteJoint')).replace('CLEAR',function(read('src/Render/SMD_Parser.cpp'),'ClearCharacters'))
+    return __import__('source_paths').show(ROOT, args.revision, path) if args.revision else (ROOT/path).read_text(encoding='utf-8')
+code=code.replace('DELETE',function(read('src/game/entity/Entity_LegacyTeleport.cpp'),'DeleteJoint')).replace('CLEAR',function(read('src/render/SMD_Parser.cpp'),'ClearCharacters'))
 with tempfile.TemporaryDirectory(prefix='mu-shield-slot-') as temp:
     path=Path(temp);(path/'main.cpp').write_text(code,encoding='utf-8')
     if os.name=='nt':

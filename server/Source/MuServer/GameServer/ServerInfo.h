@@ -50,6 +50,15 @@ public:
 
 	void ReloadMonsterInfo();
 
+	// Recarga sólo los spawns (Data/Maps y Data/Events/Invasions): borra y
+	// vuelve a crear los monstruos de los archivos que cambiaron y deja vivos
+	// los demás. Con un error en un TOML no toca nada. Sin Data/Maps hace lo
+	// mismo que ReloadMonsterInfo.
+	void ReloadSpawns();
+
+	// Reglas de los mapas: Data/Maps/NN-Nombre/Map.toml o MapManager.txt.
+	void ReadMapManagerInfo();
+
 	void ReadStartupInfo(const char* section, const char* path);
 
 	void ReadChaosMixInfo(const char* section, const char* path);
@@ -101,8 +110,13 @@ public:
 	// Autoridad del server (Fase 5): 0 = apagado, 1 = observar, 2 = aplicar
 	int m_MoveCheck;
 	int m_MoveCheckTolerance;
+	int m_MoveCheckBudget;
+	int m_MoveCheckTileTime;
+	int m_SkillLineCheck;
 	int m_AttackCheck;
 	int m_AttackCheckScale;
+	int m_PacketRateCheck;
+	int m_PacketRateMax;
 	// Common
 	int m_MainChecksum;
 	int m_MaxItemOption;
@@ -143,6 +157,7 @@ public:
 	int m_ShopItemBlockExc;
 	int m_ShopItemBlockSellOnMaxMoney;
 	int m_MaxCharacterLevel;
+	double m_ExperienceExponent;
 	int m_MaxLevelUp;
 	int m_MaxLevelUpEvent;
 	int m_MaxStatPoint[MAX_ACCOUNT_LEVEL];
@@ -372,6 +387,16 @@ public:
 	int m_SummonMonster5;
 	int m_SummonMonster6;
 	int m_SummonMonster7;
+	// Mu-Linux: invocaciones del orbe +7..+10 y escalado por stats de la elfa.
+	int m_SummonMonster8;
+	int m_SummonMonster9;
+	int m_SummonMonster10;
+	int m_SummonMonster11;
+	int m_SummonConstA;
+	int m_SummonConstB;
+	int m_SummonConstC;
+	int m_SummonMaxRate;
+	int m_SummonResetRate;
 	int m_GreaterLifeConstA;
 	int m_GreaterLifeConstB;
 	int m_GreaterLifeConstC;

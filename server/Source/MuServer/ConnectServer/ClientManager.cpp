@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "ClientManager.h"
+#include "SecureLink.h"
 #include "ConnectServerProtocol.h"
 #include "IpManager.h"
 #include "Util.h"
@@ -103,11 +104,14 @@ void CClientManager::AddClient(int index, char* ip, SOCKET socket)
 
 	gIpManager.InsertIpAddress(this->m_IpAddr);
 
-	CCServerInitSend(this->m_index, 1);
+	// Saludo del canal cifrado, o la bienvenida si la conexión va en claro.
+	gSecureLink.Begin(this->m_index);
 }
 
 void CClientManager::DelClient()
 {
+	gSecureLink.End(this->m_index);
+
 	gIpManager.RemoveIpAddress(this->m_IpAddr);
 
 	this->m_index = -1;

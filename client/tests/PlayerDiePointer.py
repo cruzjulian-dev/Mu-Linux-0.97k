@@ -29,7 +29,7 @@ MAIN = r'''
 void CallDie(CHARACTER* character) { CALL_DIE; }
 void CallWrapper(CHARACTER* character) { CALL_WRAPPER; }
 std::uint64_t RunDie(CHARACTER* character, BYTE* models, bool wrapper) {
-    DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models);
+    Models = reinterpret_cast<std::uintptr_t>(models);
     g_EnableSound = TRUE; activeCharacter = character;
     for(int slot = 0; slot < 420; ++slot) { MaxBufferChannel[slot] = 4; Enable3DSound[slot] = true; }
     digest = 14695981039346656037ull;
@@ -122,7 +122,7 @@ int main() {
 
 def harness(revision=None):
     prefix = walk_harness(revision).split("void CallWalk(CHARACTER* character)", 1)[0]
-    types = read_source("src/Entity/EntityTypes.h", revision)
+    types = read_source("src/game/entity/EntityTypes.h", revision)
     live = re.search(r"BYTE\s+Live\s*;", types).group()
     angle = re.search(r"vec3_t\s+Angle\s*;", types).group()
     light = re.search(r"vec3_t\s+Light\s*;", types).group()
@@ -131,7 +131,7 @@ def harness(revision=None):
     prefix = prefix.replace("CHARACTER* activeCharacter;", "std::vector<int> events;\nCHARACTER* activeCharacter;", 1)
     prefix = prefix.replace("requestedAction = action;", "requestedAction = action; events.push_back(20000 + action);", 1)
     prefix = prefix.replace("soundEvents.push_back(slot);", "soundEvents.push_back(slot); events.push_back(10000 + slot);", 1)
-    source = read_source("src/Entity/Character_Motion.cpp", revision)
+    source = read_source("src/game/entity/Character_Motion.cpp", revision)
     die = function(source, "SetPlayerDie")
     wrapper = function(source, "mc_SetPlayerDie")
     main = MAIN

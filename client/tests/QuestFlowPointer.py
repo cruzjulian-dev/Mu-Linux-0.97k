@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 #ifndef _WIN32
 #define __fastcall
@@ -56,7 +62,7 @@ std::uint64_t RunFlow(BYTE* memory,BYTE* packetMemory,BYTE* heroMemory,BYTE* att
         Put(record+336,moneyValues[(trial/25)%6]); Put(record+340,static_cast<short>(trial*40503u));
         Put(attributes+14,levels[(trial/3)%3]); Put(machine+0x548,moneyValues[trial%6]);
         hero[444]=static_cast<BYTE>(trial%4); attributes[11]=static_cast<BYTE>((trial*73)%4);
-        Hero=trial%2?reinterpret_cast<char*>(hero):nullptr; DAT_07cf1ff4=attributes; DAT_07cf1ffc=machine;
+        Hero=trial%2?reinterpret_cast<char*>(hero):nullptr; CharacterAttribute=attributes; CharacterMachine=machine;
         GoldenArcherOpenType=trial*40503u; InventoryOpened=static_cast<BYTE>(trial); CharacterOpened=static_cast<BYTE>(trial*73);
         const DWORD oldEvent=GoldenArcherOpenType; const auto oldInventory=InventoryOpened,oldCharacter=CharacterOpened;
         stage=0; inventoryCalls=0; missing=(trial/4)%2;
@@ -122,21 +128,21 @@ def harness(revision=None):
     prefix += "inline CHARACTER* AsCharacter(void* p) { return static_cast<CHARACTER*>(p); }\n"
     prefix += "inline CHARACTER* AsCharacter(std::uintptr_t p) { return reinterpret_cast<CHARACTER*>(p); }\n"
     header, definitions = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
-    for name in ("g_csQuest", "Hero", "DAT_07cf1ff4", "DAT_07cf1ffc", "GoldenArcherOpenType", "DAT_07eaa117", "DAT_07eaa116"):
-        prefix += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
-        prefix += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M).group()
+    for name in ("g_csQuest", "Hero", "CharacterAttribute", "CharacterMachine", "GoldenArcherOpenType", "InventoryOpened", "CharacterOpened"):
+        prefix += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
+        prefix += optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M))
     aliases = header + read_source("src/structs.h", revision)
-    for name in ("DAT_07abf5d8", "CharacterAttribute", "_g_bEventChipDialogEnable", "InventoryOpened", "CharacterOpened"):
-        prefix += "\n" + re.search(rf"^#define\s+{name}\s+[^\n]+", aliases, re.M).group() + "\n"
+    for name in ("DAT_07abf5d8", "_g_bEventChipDialogEnable"):   # el primero sólo existe en revisiones viejas
+        prefix += "\n" + (lambda m: m.group() if m else "")(re.search(rf"^#define\s+{name}\s+[^\n]+", aliases, re.M)) + "\n"
     prefix += SERVICES
-    scene = read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision)
+    scene = read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision)
     for name in ("CSQuest_GetQuestState", "CSQuest_FindQuestContext", "CSQuest_CheckActCondition", "CSQuest_CheckRequestCondition", "CSQuest_CheckQuestState"):
         prefix += function(scene, name)
-    prefix += function(read_source("src/Scene/Scene_LegacyCleanup.cpp", revision), "CSQuest__CheckQuestState")
-    medium = read_source("src/Core/Runtime_Medium.cpp", revision)
+    prefix += function(read_source("src/scenes/Scene_LegacyCleanup.cpp", revision), "CSQuest__CheckQuestState")
+    medium = read_source("src/app/core/Runtime_Medium.cpp", revision)
     prefix += function(medium, "CSQuest__ShowQuestNpcWindow") + function(medium, "CSQuest__setQuestLists")
-    prefix += function(read_source("src/Core/Runtime_Small.cpp", revision), "CSQuest__setQuestList")
-    recv = read_source("src/Net/Recv/Recv_Quest.cpp", revision)
+    prefix += function(read_source("src/app/core/Runtime_Small.cpp", revision), "CSQuest__setQuestList")
+    recv = read_source("src/net/Recv/Recv_Quest.cpp", revision)
     for name in ("NetRecv_A0", "NetRecv_A1", "NetRecv_A2"):
         prefix += function(recv, name)
     return prefix + MAIN

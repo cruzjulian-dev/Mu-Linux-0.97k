@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import ROOT, build_and_run, function, read_source
 from LegacyEntityLayout import opaque_cloth_fields
+
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
 SERVICES=r'''
 #include <array>
 #include <algorithm>
@@ -21,14 +27,14 @@ inline OBJECT* AsObject(void* p){return static_cast<OBJECT*>(p);}inline const OB
 TRANSFORMS
 STRUCTURES
 std::vector<PreparedBones> prepared;PreparedBones* geometryPose;bool batchActive;
-uintptr_t DAT_05828d58,DAT_07abf5d0;float* globalBones;
+uintptr_t Models,CharactersClient;float* globalBones;
 #define DAT_06970a9c (*reinterpret_cast<DWORD*>(globalBones))
 char DAT_05826e18[200*16];float parentStore[12];
 #define DAT_06989c9c parentStore[0]
-int DAT_07e11d30;DWORD MoveSceneFrame=100;
+int EditFlag;DWORD MoveSceneFrame=100;
 OBJECT* subject;BYTE* activeModel;float* selectedBones;unsigned operation;char translation;int selection;
 std::vector<int> events;unsigned skeletonCalls;
-void Context(BYTE* output){std::memcpy(output+104,&subject->Scale,4);output[160]=subject->CurrentAction;std::memcpy(output+108,subject->Position,12);if(subject->Type==331){const float y=subject->Position[1]+_DAT_0055290c;std::memcpy(output+112,&y,4);}else if(subject->Type==330){const float y=subject->Position[1]+_DAT_00552908;std::memcpy(output+112,&y,4);}}
+void Context(BYTE* output){std::memcpy(output+104,&subject->Scale,4);output[160]=subject->CurrentAction;std::memcpy(output+108,subject->Position,12);if(subject->Type==331){const float y=subject->Position[1]+60.0f;std::memcpy(output+112,&y,4);}else if(subject->Type==330){const float y=subject->Position[1]+120.0f;std::memcpy(output+112,&y,4);}}
 void BMD_Animation(void* model,float* bones,float frame,unsigned prior,unsigned char action,unsigned* angles,float* head,char special,char translate){
  Require(model==activeModel && bones==selectedBones && frame==subject->AnimationFrame && action==subject->PriorAction && angles==reinterpret_cast<unsigned*>(subject->Angle) && head==subject->HeadAngle && !special && translate==(translation==0));unsigned expected;std::memcpy(&expected,&subject->PriorAnimationFrame,4);Require(prior==expected);BYTE context[188];std::memcpy(context,activeModel,188);Context(context);Require(std::memcmp(context+104,activeModel+104,16)==0 && activeModel[160]==subject->CurrentAction);std::memcpy(activeModel+120,angles,12);std::memcpy(activeModel+164,&frame,4);const short index=123;std::memcpy(activeModel+168,&index,2);bones[0]=77;bones[1]=-33;events.push_back(2);
 }
@@ -42,7 +48,7 @@ void Draw_RenderObject(void* object,int slot,int flag,char mode){Require(object=
 FORWARDS
 '''
 MAIN=r'''
-void Invoke(unsigned op){switch(op){case 0:ObjectPose_PrepareBones(ENTITY,activeModel,globalBones,translation);break;case 1:Require(Calc_RenderObject(ENTITY,translation,selection)==(subject->Alpha<_DAT_005524f8?0:1));break;case 2:ObjectPose_PrepareBounds(ENTITY,translation);break;case 3:ObjectPose_PrepareSimulation(ENTITY,translation);break;case 4:ObjectPose_TickMeshEvents(ENTITY,activeModel,globalBones,translation);break;case 5:Entity_PrepareRender(subject,translation,selection,7);break;}}
+void Invoke(unsigned op){switch(op){case 0:ObjectPose_PrepareBones(ENTITY,activeModel,globalBones,translation);break;case 1:Require(Calc_RenderObject(ENTITY,translation,selection)==(subject->Alpha<0.01f?0:1));break;case 2:ObjectPose_PrepareBounds(ENTITY,translation);break;case 3:ObjectPose_PrepareSimulation(ENTITY,translation);break;case 4:ObjectPose_TickMeshEvents(ENTITY,activeModel,globalBones,translation);break;case 5:Entity_PrepareRender(subject,translation,selection,7);break;}}
 template<class T>void Store(BYTE* p,unsigned offset,T value){std::memcpy(p+offset,&value,sizeof(value));}
 void Hash(std::uint64_t& h,const void* p,unsigned n){for(unsigned i=0;i<n;++i){h^=static_cast<const BYTE*>(p)[i];h*=1099511628211ull;}}
 std::uint64_t Run(BYTE* data,BYTE* pool,BYTE* models,BYTE* boneMem){
@@ -53,15 +59,15 @@ std::uint64_t Run(BYTE* data,BYTE* pool,BYTE* models,BYTE* boneMem){
   const std::uint32_t previous[]={0u,0x80000000u,0x3f400000u,0x7fc12345u};std::memcpy(&subject->PriorAnimationFrame,&previous[(trial/23)%4],4);
   for(unsigned i=0;i<3;++i){subject->Position[i]=float(int(trial%17)-8+int(i));subject->Angle[i]=float(i*30);subject->HeadAngle[i]=float(i*5);subject->BoundingBoxMax[i]=float(i+4);}
   auto* alternate=reinterpret_cast<float*>(data+4096);subject->BoneMatrices=reinterpret_cast<vec34_t*>(alternate);subject->BoundingBoxMin[0]=0;subject->BoundingBoxMin[1]=-2;subject->BoundingBoxMin[2]=-3;
-  activeModel=models+16+subject->Type*188;std::memset(activeModel-16,0xa5,220);DAT_05828d58=reinterpret_cast<uintptr_t>(models+16);DAT_07abf5d0=reinterpret_cast<uintptr_t>(pool+16);const auto bonePtr=static_cast<std::uint32_t>(reinterpret_cast<uintptr_t>(data+16)),actionPtr=static_cast<std::uint32_t>(reinterpret_cast<uintptr_t>(data+512));Store(activeModel,44,bonePtr);Store(activeModel,48,actionPtr);Store(activeModel,34,short(2));Store(activeModel,38,short(2));Store(activeModel,84,int(-1));Store(activeModel,132,2.0f);data[16+34]=0;data[16+140+34]=trial&1;
+  activeModel=models+16+subject->Type*188;std::memset(activeModel-16,0xa5,220);Models=reinterpret_cast<uintptr_t>(models+16);CharactersClient=reinterpret_cast<uintptr_t>(pool+16);const auto bonePtr=static_cast<std::uint32_t>(reinterpret_cast<uintptr_t>(data+16)),actionPtr=static_cast<std::uint32_t>(reinterpret_cast<uintptr_t>(data+512));Store(activeModel,44,bonePtr);Store(activeModel,48,actionPtr);Store(activeModel,34,short(2));Store(activeModel,38,short(2));Store(activeModel,84,int(-1));Store(activeModel,132,2.0f);data[16+34]=0;data[16+140+34]=trial&1;
   frozen.boneHeaders.assign(data+16,data+16+280);frozen.actionHeaders.assign(data+512,data+512+32);std::memcpy(cached.inputModel.data(),activeModel,188);Context(cached.inputModel.data());std::memcpy(cached.model.data(),cached.inputModel.data(),188);for(unsigned i=0;i<3;++i)Store(cached.model.data(),120+i*4,float(9-i));Store(cached.model.data(),164,3.75f);Store(cached.model.data(),168,short(8));cached.model[160]=171;
   std::memcpy(cached.object.data(),subject,444);cached.boneCount=2;cached.valid=true;cached.writesParent=(trial>>1)&1;cached.originalModel=activeModel;for(unsigned i=0;i<24;++i)cached.bones[i]=float(10+i);for(unsigned i=0;i<32;++i)cached.quaternions[i]=char(32+i);for(unsigned i=0;i<12;++i)cached.parent[i]=float(200+i);
-  translation=(trial/16)%3==0?0:(trial/16)%3==1?1:-1;selection=selections[(trial/48)%6];DAT_07e11d30=(trial/29)%2?2:0;batchActive=operation==0;const unsigned mode=trial%16;
-  if(operation==0){if(mode==0)batchActive=false;if(mode==1)translation=1;if(mode==2)translation=0;if(mode==3)cached.valid=false;if(mode==4)cached.originalModel=activeModel+4;if(mode==5)cached.inputModel[84]^=1;if(mode==6)frozen.boneHeaders[0]^=1;if(mode==7)frozen.actionHeaders[0]^=1;if(mode==8)cached.object[264]^=1;if(mode==9)cached.object[262]^=1;if(mode==10)cached.object[28]^=1;if(mode==11)cached.object[40]^=1;if(mode==12)++DAT_07abf5d0;if(mode==13)DAT_07abf5d0=reinterpret_cast<uintptr_t>(subject)-400*916;}
+  translation=(trial/16)%3==0?0:(trial/16)%3==1?1:-1;selection=selections[(trial/48)%6];EditFlag=(trial/29)%2?2:0;batchActive=operation==0;const unsigned mode=trial%16;
+  if(operation==0){if(mode==0)batchActive=false;if(mode==1)translation=1;if(mode==2)translation=0;if(mode==3)cached.valid=false;if(mode==4)cached.originalModel=activeModel+4;if(mode==5)cached.inputModel[84]^=1;if(mode==6)frozen.boneHeaders[0]^=1;if(mode==7)frozen.actionHeaders[0]^=1;if(mode==8)cached.object[264]^=1;if(mode==9)cached.object[262]^=1;if(mode==10)cached.object[28]^=1;if(mode==11)cached.object[40]^=1;if(mode==12)++CharactersClient;if(mode==13)CharactersClient=reinterpret_cast<uintptr_t>(subject)-400*916;}
   const bool hit=operation==0 && batchActive && translation==1 && cached.valid && mode!=4 && mode!=5 && mode!=6 && mode!=7 && mode!=8 && mode!=9 && mode!=10 && mode!=11 && mode!=12 && mode!=13;
   geometryPose=&prepared[1];_DAT_005597c8=9.75f;events.clear();skeletonCalls=0;
   BYTE objectExpected[444],modelExpected[220],bonesExpected[192],dataExpected[8192],qExpected[sizeof(DAT_05826e18)],parentExpected[sizeof(parentStore)];std::memcpy(objectExpected,subject,444);std::memcpy(modelExpected,activeModel-16,220);std::memcpy(bonesExpected,boneMem,192);std::memcpy(dataExpected,data,8192);std::memcpy(qExpected,DAT_05826e18,sizeof(qExpected));std::memcpy(parentExpected,parentStore,sizeof(parentExpected));auto* modelOut=modelExpected+16;
-  const bool visible=subject->Alpha>=_DAT_005524f8,calc=visible && (operation==1 || operation==5 || ((operation==2 || operation==3) && DAT_07e11d30==2));const bool pose=operation==0 || calc || (operation==3 && visible);const bool meshEvent=operation==4 && visible && subject->Live && ((subject->Type==331 && subject->CurrentAction==6) || (subject->Type==330 && (subject->CurrentAction==6 || int(MoveSceneFrame)-subject->InitialSceneFrame<25)));
+  const bool visible=subject->Alpha>=0.01f,calc=visible && (operation==1 || operation==5 || ((operation==2 || operation==3) && EditFlag==2));const bool pose=operation==0 || calc || (operation==3 && visible);const bool meshEvent=operation==4 && visible && subject->Live && ((subject->Type==331 && subject->CurrentAction==6) || (subject->Type==330 && (subject->CurrentAction==6 || int(MoveSceneFrame)-subject->InitialSceneFrame<25)));
   if(operation==2 || operation==3)selection=0;selectedBones=operation==0 || operation==4?globalBones:subject->EnableBoneMatrix?alternate:globalBones;
   std::vector<int> expectedEvents;
   if(calc){Store(modelOut,132,0u);modelOut[69]=subject->ContrastEnable;const float rgb[]={.25f,.5f,.75f};std::memcpy(modelOut+72,rgb,12);expectedEvents.push_back(1);}
@@ -69,7 +75,7 @@ std::uint64_t Run(BYTE* data,BYTE* pool,BYTE* models,BYTE* boneMem){
   if(pose){Context(modelOut);if(hit){std::memcpy(modelOut+120,cached.model.data()+120,12);std::memcpy(modelOut+164,cached.model.data()+164,6);modelOut[160]=cached.model[160];for(unsigned i=0;i<2;++i)if(!data[16+i*140+34]){std::memcpy(bonesExpected+16+i*48,cached.bones.data()+i*12,48);std::memcpy(qExpected+i*16,cached.quaternions.data()+i*16,16);}if(cached.writesParent)std::memcpy(parentExpected,cached.parent.data(),48);++hits;}else{std::memcpy(modelOut+120,subject->Angle,12);Store(modelOut,164,subject->AnimationFrame);Store(modelOut,168,short(123));const float values[]={77,-33};if(selectedBones==globalBones)std::memcpy(bonesExpected+16,values,8);else std::memcpy(dataExpected+4096,values,8);expectedEvents.push_back(2);}}
   float expectedScale=9.75f;
   if(calc){if(selection==1){modelOut[68]=0;for(unsigned i=0;i<2;++i){expectedEvents.push_back(3);expectedEvents.push_back(4);}expectedEvents.push_back(1);}expectedEvents.push_back(3);expectedScale=selection==3?1.4f:selection==2?1.2f:1.0f;for(unsigned i=0;i<12;++i)Store(objectExpected,304+i*4,float(100+i));if(operation==5)expectedEvents.push_back(7);}
-  else if(visible && (operation==2 || operation==3)){float origin[3];std::memcpy(origin,subject->Position,12);if(subject->Type==331)origin[1]+=_DAT_0055290c;else if(subject->Type==330)origin[1]+=_DAT_00552908;float result[12]={};for(unsigned i=0;i<3;++i){result[i]=subject->BoundingBoxMin[i]+origin[i];result[3+4*i]=subject->BoundingBoxMax[i]-subject->BoundingBoxMin[i];}std::memcpy(objectExpected+304,result,48);}
+  else if(visible && (operation==2 || operation==3)){float origin[3];std::memcpy(origin,subject->Position,12);if(subject->Type==331)origin[1]+=60.0f;else if(subject->Type==330)origin[1]+=120.0f;float result[12]={};for(unsigned i=0;i<3;++i){result[i]=subject->BoundingBoxMin[i]+origin[i];result[3+4*i]=subject->BoundingBoxMax[i]-subject->BoundingBoxMin[i];}std::memcpy(objectExpected+304,result,48);}
   if(meshEvent){expectedEvents={3,5,6};if(subject->CurrentAction==6)objectExpected[0]=0;}
   Invoke(operation);Require(events==expectedEvents && _DAT_005597c8==expectedScale && geometryPose==(hit?&cached:pose?nullptr:&prepared[1]) && std::memcmp(subject,objectExpected,444)==0 && std::memcmp(activeModel-16,modelExpected,220)==0 && std::memcmp(boneMem,bonesExpected,192)==0 && std::memcmp(data,dataExpected,8192)==0 && std::memcmp(DAT_05826e18,qExpected,sizeof(qExpected))==0 && std::memcmp(parentStore,parentExpected,sizeof(parentExpected))==0);
   Hash(hash,objectExpected,444);Hash(hash,modelExpected,220);Hash(hash,bonesExpected,192);Hash(hash,qExpected,64);Hash(hash,parentExpected,48);for(int event:events)Hash(hash,&event,4);++cases;
@@ -81,23 +87,23 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));auto* pool=static_
  std::printf("Pose entity: 12288 casos, contexto/cache/SIM/render %016llx\n",static_cast<unsigned long long>(expected));}
 '''
 def harness(revision=None):
- pose=read_source('src/Entity/ObjectPose.cpp',revision);render=read_source('src/Render/Entity_AnimationLegacy.cpp',revision)
+ pose=read_source('src/game/entity/ObjectPose.cpp',revision);render=read_source('src/render/Entity_AnimationLegacy.cpp',revision)
  names=('PrepareContext','ReuseBones','ObjectPose_PrepareBones','ObjectPose_PrepareBounds','ObjectPose_PrepareSimulation','ObjectPose_TickMeshEvents')
- bodies=[function(pose,n)for n in names]+[function(render,'Calc_RenderObject'),function(read_source('src/Render/Entity_PrepareRender.cpp',revision),'Entity_PrepareRender')]
+ bodies=[function(pose,n)for n in names]+[function(render,'Calc_RenderObject'),function(read_source('src/render/Entity_PrepareRender.cpp',revision),'Entity_PrepareRender')]
  prototypes='\n'.join(b.split('{',1)[0]+';'for b in bodies)
- fields=re.search(r'struct OBJECT\s*\{[\s\S]*?\n\};',read_source('src/Entity/EntityTypes.h',revision)).group();fields=re.sub(r'OBJECT\*\s+Owner;',r'std::uint32_t Owner;',fields)
+ fields=re.search(r'struct OBJECT\s*\{[\s\S]*?\n\};',read_source('src/game/entity/EntityTypes.h',revision)).group();fields=re.sub(r'OBJECT\*\s+Owner;',r'std::uint32_t Owner;',fields)
  fields=re.sub(r'vec34_t\*\s+BoneMatrices;[^\n]*\n\s*vec3_t\s+BoundingBoxMin;[^\n]*',r'union { vec34_t* BoneMatrices; struct { std::uint32_t BoneLow; vec3_t BoundingBoxMin; }; };',fields)
  fields=re.sub(r'OBJECT\*\s+(ScenePrevious|SceneNext)\b',r'std::uint32_t \1',fields)
  fields=opaque_cloth_fields(fields)
  view='using vec3_t=float[3];using vec34_t=float[3][4];\n#pragma pack(push,1)\n'+fields+'\n#pragma pack(pop)\nstatic_assert(sizeof(OBJECT)==444 && offsetof(OBJECT,BoneMatrices)==276 && offsetof(OBJECT,BoundingBoxMin)==280 && offsetof(OBJECT,OBB)==304);\n'
  structures=pose[pose.index('struct FrozenModel {'):pose.index('// Cada slot conserva capacidad',pose.index('struct FrozenModel {'))]
- code=''.join(bodies)+function(read_source('src/Entity/ObjectBounds.h',revision),'ObjectBounds_Build')
- constants=''.join(re.search(r'^float\s+'+n+r'\s*=\s*[^;]+;',read_source('src/globals.cpp',revision),re.M).group()for n in sorted(set(re.findall(r'\b_DAT_[0-9a-f]+\b',code))))
- services=SERVICES.replace('VIEW',view).replace('TRANSFORMS','#include "'+(ROOT/'src/Render/TransformMath.h').as_posix()+'"').replace('STRUCTURES',structures).replace('FORWARDS',prototypes)
+ code=''.join(bodies)+function(read_source('src/game/entity/ObjectBounds.h',revision),'ObjectBounds_Build')
+ constants=''.join(optional_definition(re.search(r'^float\s+'+n+r'\s*=\s*[^;]+;',read_source('src/globals.cpp',revision),re.M))for n in sorted(set(re.findall(r'\b_DAT_[0-9a-f]+\b',code))))
+ services=SERVICES.replace('VIEW',view).replace('TRANSFORMS','#include "'+(ROOT/'src/render/TransformMath.h').as_posix()+'"').replace('STRUCTURES',structures).replace('FORWARDS',prototypes)
  if 'AsModel(' in bodies[0]:
   from LegacyModelLayout import VIEW
   services=VIEW+"\nstruct CHARACTER{unsigned char Bytes[916];};\n"+services
- bounds=function(read_source('src/Entity/ObjectBounds.h',revision),'ObjectBounds_Build')
+ bounds=function(read_source('src/game/entity/ObjectBounds.h',revision),'ObjectBounds_Build')
  body=PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x100000')+constants+services+bounds+''.join(bodies)
  batch=re.search(r'^\s*PrepareContext\([^;\n]*p\.object\.data\(\)[^;\n]*;',pose,re.M).group()
  batch_fn='\nvoid BatchContext(PreparedBones& p){'+batch+'}\n'

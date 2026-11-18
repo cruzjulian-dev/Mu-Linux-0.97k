@@ -1,0 +1,68 @@
+# Identidad del server
+
+Cada instalación del server tiene una clave de firma propia. Con ella el
+GameServer firma la lista de datos que le manda al cliente (el catálogo), y el
+cliente la usa para saber que sigue hablando con el mismo server de siempre.
+
+La misma clave autentica el **canal cifrado**: al conectarse, el GameServer firma
+con ella su saludo, y a partir de ahí todo lo que viaja entre el cliente y el
+server va cifrado y con verificación de integridad. Un tercero que escuche la red
+no puede leer el tráfico ni cambiarlo sin que la conexión se corte.
+
+Desde 0.97.45 el ConnectServer usa la misma clave: lee el mismo
+`Data/Keys/ServerIdentity.key` y la conexión con la lista de servers también va
+cifrada. Por ese canal reparte además los `.toml` de `Data/ClientContent`. Si el
+ConnectServer no encuentra la clave, esa conexión sigue en claro como antes y no
+reparte nada.
+
+## Dónde está
+
+`Data/Keys/ServerIdentity.key`, dentro del volumen de datos. Se genera sola la
+primera vez que arranca el GameServer y sobrevive a las actualizaciones de la
+imagen.
+
+El archivo tiene la clave **privada**: no lo compartas ni lo subas a un
+repositorio. Quien lo tenga puede hacerse pasar por tu server. Guardá una copia
+junto con el resto del respaldo de `Data/`.
+
+La clave **pública** sí se comparte. Sale en el log del GameServer al arrancar:
+
+```
+[ServerIdentity] Clave publica: 3f9c...
+```
+
+## Qué hace el cliente con ella
+
+- La primera vez que un cliente entra a tu server guarda la clave pública en
+  `User/Cache/<server>/server.pub`.
+- En cada conexión verifica que el saludo del server venga firmado con esa
+  clave, y en cada login que el catálogo también. Si no, muestra un aviso y se
+  cierra.
+- Si compilás tu propio cliente podés fijarla de antemano en
+  `client/src/app/config/ServerConfig.h` (`ServerPublicKey`). Así ni siquiera el
+  primer contacto queda sin verificar.
+
+## Cambiar la clave
+
+Hay dos formas, según el caso.
+
+**Rotación (lo normal).** Creá el archivo vacío
+`Data/Keys/ServerIdentity.regenerate` y reiniciá el GameServer. Se genera una
+clave nueva, la anterior firma el reemplazo y el archivo marcador se borra solo.
+Los clientes que ya conocían tu server aceptan la clave nueva sin hacer nada.
+
+```
+touch Data/Keys/ServerIdentity.regenerate
+docker compose restart mu-server
+```
+
+**Empezar de cero.** Si borrás `ServerIdentity.key`, el server genera otra sin
+relación con la anterior. Los clientes que tenían la vieja la van a rechazar
+hasta que borren su `User/Cache/<server>/server.pub`. Usalo sólo si perdiste la
+clave o creés que alguien más la tiene: en ese caso una rotación no sirve,
+porque quien tenga la clave vieja también podría firmar un reemplazo.
+
+## Si se pierde `Data/`
+
+Restaurá `Data/Keys/ServerIdentity.key` del respaldo antes de arrancar. Si no lo
+tenés, el server va a generar una clave nueva y vale lo de "empezar de cero".

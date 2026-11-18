@@ -16,6 +16,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SUPPORT = r'''
 BYTE* reservation;
 unsigned selectedOffset;
@@ -77,19 +83,20 @@ def harness(revision=None):
     globals_source = read_source("src/globals.cpp", revision)
     declarations = ""
     for name in ("DAT_055c9e48", "CharactersClient"):
-        declarations += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
+        declarations += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
         declarations += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", globals_source, re.M).group()
     # Extraer también el alias de producción: no crear almacenamiento paralelo.
-    alias = re.search(r"^#define DAT_07abf5d0[^\n]+", read_source("src/structs.h", revision), re.M).group()
-    entry = read_source("src/Platform/ClientEntry.cpp", revision)
+    # El alias CharactersClient -> CharactersClient existe sólo en revisiones viejas.
+    alias = (lambda m: m.group() if m else "")(re.search(r"^#define DAT_07abf5d0[^\n]+", read_source("src/structs.h", revision), re.M))
+    entry = read_source("src/platform/ClientEntry.cpp", revision)
     start = re.search(r"^[ \t]*DAT_055c9e48\s*=", entry, re.M).start()
     end = entry.index(";", entry.index("memset(", start)) + 1
     initialize = entry[start:end].replace("malloc(0x764d4)", "AllocatePool(0x764d4)")
     initialize = initialize.replace("malloc(529 * CHARACTER_STRIDE)", "AllocatePool(529 * CHARACTER_STRIDE)")
     assert "AllocatePool(" in initialize, "la reserva del pool no se pudo interceptar"
     initialize = initialize.replace("rand()", "SelectedOffset()")
-    lookup = function(read_source("src/Entity/Entity_Lookup.cpp", revision), "Entity_FindById")
-    legacy = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "FindCharacterIndex")
+    lookup = function(read_source("src/game/entity/Entity_Lookup.cpp", revision), "Entity_FindById")
+    legacy = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "FindCharacterIndex")
     return (PREAMBLE.split("BYTE* reservation;")[0].replace("0x10000", "0x100000")
             + declarations + "\n" + alias + "\n" + SUPPORT
             + "void InitializePool() {" + initialize + "}\n" + lookup + legacy + MAIN)

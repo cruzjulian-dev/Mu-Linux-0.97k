@@ -10,12 +10,12 @@ using std::uintptr_t;
 #ifndef _WIN32
 using LPBYTE=BYTE*;
 #endif
-DWORD DAT_055c9ff8=0x26000000u;unsigned calls;int rendererType;unsigned selectedSize;DWORD textDc,rendererDc;
+DWORD g_pRenderText=0x26000000u;unsigned calls;int rendererType;unsigned selectedSize;DWORD textDc,rendererDc;
 struct Window{void* GetHdc(){return reinterpret_cast<void*>(uintptr_t(0x12345678u));}}gWindow;
 void PathFinder_ResetContext(){Require(calls++==0);}
 void OpenTGA(const char* name,int slot,unsigned filter,unsigned wrap,int arg,char flag){Require(calls==unsigned(slot+1)&&std::strcmp(name,slot==0?"Interface/FontInput.tga":"Interface/FontTest.tga")==0&&filter==0x2600&&wrap==0x2900&&arg==0&&flag==1);++calls;}
 void Font_CreateTextDib(DWORD dc){Require(calls++==3);textDc=dc;}
-void Font_CreateRenderer(int self,int param_1,int dc){Require(calls++==4&&DWORD(self)==DAT_055c9ff8);rendererType=param_1;rendererDc=DWORD(dc);selectedSize=(MODE_CONDITION)?0x2c4:4;}
+void Font_CreateRenderer(int self,int param_1,int dc){Require(calls++==4&&DWORD(self)==g_pRenderText);rendererType=param_1;rendererDc=DWORD(dc);selectedSize=(MODE_CONDITION)?0x2c4:4;}
 '''
 MAIN=r'''
 int main(){std::uint64_t hash=14695981039346656037ull;unsigned cases=0;const DWORD boundary[]={0x10000u,0x7fffffffu,0x80000000u,0xfffffffeu,0xffffffffu};
@@ -23,10 +23,13 @@ int main(){std::uint64_t hash=14695981039346656037ull;unsigned cases=0;const DWO
  Require(cases==65541);std::printf("Font mode:65541 valores32 %016llx\n",(unsigned long long)hash);}
 '''
 def harness(revision=None):
- source=read_source('src/globals.cpp',revision);match=re.search(r'(DWORD|LPBYTE)\s+lpData_055ca044\s*=\s*(?:0|NULL);',source);assert match;declaration=match.group();assertion='' if revision else 'static_assert(std::is_same<decltype(lpData_055ca044),DWORD>::value,"TextOut es valor32");'
+ source=read_source('src/globals.cpp',revision);match=re.search(r'(DWORD|LPBYTE)\s+(lpData_055ca044|g_iRenderTextType)\s*=\s*(?:0|NULL);',source);assert match;declaration=match.group();var=match.group(2)
+ # lpData_055ca044 pasó a llamarse g_iRenderTextType (T8o).
+ if var!='lpData_055ca044':declaration+='\n#define lpData_055ca044 '+var+'\n'
+ assertion='' if revision else 'static_assert(std::is_same<decltype(lpData_055ca044),DWORD>::value,"TextOut es valor32");'
  set_mode='lpData_055ca044=reinterpret_cast<LPBYTE>(uintptr_t(mode));' if revision else 'lpData_055ca044=mode;';get_mode='static_cast<DWORD>(reinterpret_cast<uintptr_t>(lpData_055ca044))' if revision else 'lpData_055ca044'
- factory=function(read_source('src/Render/Font_LegacyFactory.cpp',revision),'Font_CreateRenderer');condition=re.search(r'if \((param_1 == 1)\)',factory);assert condition
- return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES.replace('MODE_CONDITION',condition[1])+declaration+assertion+'void SetMode(DWORD mode){'+set_mode+'}DWORD GetMode(){return '+get_mode+';}'+function(read_source('src/Scene/Scene_OpenWorld.cpp',revision),'OpenFont')+MAIN
+ factory=function(read_source('src/render/Font_LegacyFactory.cpp',revision),'Font_CreateRenderer');condition=re.search(r'if \((param_1 == 1)\)',factory);assert condition
+ return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES.replace('MODE_CONDITION',condition[1])+declaration+assertion+'void SetMode(DWORD mode){'+set_mode+'}DWORD GetMode(){return '+get_mode+';}'+function(read_source('src/scenes/Scene_OpenWorld.cpp',revision),'OpenFont')+MAIN
 
 def main():
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--architecture',choices=('Win32','x64'),default='x64');p.add_argument('--generator');p.add_argument('--reference-ref');args=p.parse_args()

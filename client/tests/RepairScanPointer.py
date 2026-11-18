@@ -13,6 +13,12 @@ import tempfile
 from ItemConvertPointer import harness as convert_harness, SERVICES
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 BACKEND = r'''
 int catalogMode;
 int Behavior(int type) { return catalogMode && type>=512 ? type%512 : type; }
@@ -26,7 +32,7 @@ struct Event { int operation, slot, type, level, dur, max; };
 std::vector<Event> events;
 int Slot(void* item) {
     const auto value=reinterpret_cast<std::uintptr_t>(item);
-    const auto equipment=reinterpret_cast<std::uintptr_t>(DAT_07cf1ffc)+0x218;
+    const auto equipment=reinterpret_cast<std::uintptr_t>(CharacterMachine)+0x218;
     const auto bag=reinterpret_cast<std::uintptr_t>(inventory);
     if(value>=equipment && value<equipment+12*68 && (value-equipment)%68==0) return static_cast<int>((value-equipment)/68);
     Require(value>=bag && value<bag+64*68 && (value-bag)%68==0);
@@ -53,7 +59,7 @@ unsigned int Item_CalculateRepairCost(int gold,int dur,int max,short type,char* 
 
 MAIN = r'''
 std::uint64_t RunScan(BYTE* machineMemory,BYTE* bagMemory,BYTE* tableMemory) {
-    DAT_07cf1ffc=machineMemory+16; inventory=bagMemory+16;
+    CharacterMachine=machineMemory+16; inventory=bagMemory+16;
     auto* table=reinterpret_cast<ITEM_ATTRIBUTE*>(tableMemory+64); DAT_07d78068=reinterpret_cast<std::uintptr_t>(table);
     constexpr std::size_t tableSize=8192*64;
     std::memset(tableMemory,0xa5,tableSize+80);
@@ -65,7 +71,7 @@ std::uint64_t RunScan(BYTE* machineMemory,BYTE* bagMemory,BYTE* tableMemory) {
         catalogMode=trial%2; std::memset(machineMemory,0x5a,1444); std::memset(bagMemory,0x6b,4384);
         std::vector<Event> expected; int total=0;
         for(int slot=0;slot<76;++slot) {
-            ITEM* item=reinterpret_cast<ITEM*>(slot<12?static_cast<BYTE*>(DAT_07cf1ffc)+0x218+slot*68:inventory+(slot-12)*68);
+            ITEM* item=reinterpret_cast<ITEM*>(slot<12?static_cast<BYTE*>(CharacterMachine)+0x218+slot*68:inventory+(slot-12)*68);
             const short type=trial%3==0?edges[(trial/3+slot)%29]:static_cast<short>((trial+slot*127)%8192);
             const bool empty=slot<12 && (trial+slot)%7==0;
             item->Type=empty?-1:type; item->Key=(trial+slot)%5==0?0:static_cast<int>(0x80000000u|trial|1u);
@@ -120,10 +126,10 @@ int main() {
 def harness(revision=None):
     prefix=convert_harness(revision).split("void __cdecl ItemConvert(",1)[0].replace(SERVICES,BACKEND)
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
-    for name in ("DAT_07cf1ffc","DAT_07eaa0f8"):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-        prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
-    return prefix+SERVICES_SCAN+function(read_source("src/Item/Item_Durability.cpp",revision),"Item_RecalculateRepairCost")+MAIN
+    for name in ("CharacterMachine","DAT_07eaa0f8"):
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+        prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
+    return prefix+SERVICES_SCAN+function(read_source("src/game/item/Item_Durability.cpp",revision),"Item_RecalculateRepairCost")+MAIN
 
 
 def main():

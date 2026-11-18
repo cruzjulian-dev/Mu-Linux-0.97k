@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 std::uint32_t seed;
 std::uint32_t Input() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
@@ -72,8 +78,8 @@ int main() {
 
 def harness(revision=None):
     prefix = PREAMBLE.split("BYTE* reservation;", 1)[0] + "\n#include <cmath>\n"
-    prefix += re.search(r"^float\s+_DAT_00552d00\s*=[^;]+;", read_source("src/globals.cpp", revision), re.M).group()
-    slerp = function(read_source("src/Render/Render_LegacyTransforms.cpp", revision), "QuatSlerp")
+    prefix += optional_definition(re.search(r"^float\s+_DAT_00552d00\s*=[^;]+;", read_source("src/globals.cpp", revision), re.M))
+    slerp = function(read_source("src/render/Render_LegacyTransforms.cpp", revision), "QuatSlerp")
     call = "QuatSlerp(a, b, t, output);" if "const float* q1" in slerp else "int bits; std::memcpy(&bits, &t, 4); QuatSlerp(static_cast<int>(reinterpret_cast<std::uintptr_t>(a)), static_cast<int>(reinterpret_cast<std::uintptr_t>(b)), bits, static_cast<int>(reinterpret_cast<std::uintptr_t>(output)));"
     return prefix + slerp + MAIN.replace("CALL_SLERP", call)
 

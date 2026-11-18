@@ -13,6 +13,12 @@ import tempfile
 from ItemConvertPointer import harness as convert_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 std::uint64_t RunGroup(BYTE* memory) {
     inventory=memory+16; InitializeAliases();
@@ -67,17 +73,17 @@ def harness(revision=None):
     prefix+="\nBYTE* inventory;\n#define OffsetInventoryItems (*reinterpret_cast<BYTE(*)[4352]>(inventory))\n"
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
     for name in ("DAT_00559c60","DAT_00559c64","DAT_00559c68"):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-        prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+        prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
     initializers=[]
     for name in ("p_DAT_07ea9504_","p_DAT_07ea9328_"):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
         prefix+=f"\nint* {name}=nullptr;\n"
-        initializers.append(re.search(rf"\b{name}\s*=\s*[^;]+;",definitions).group())
+        initializers.append(optional_definition(re.search(rf"\b{name}\s*=\s*[^;]+;",definitions)))
     for name in ("DAT_07ea9504","DAT_07ea9328"):
         prefix+="\n"+re.search(rf"^#define\s+{name}\s+[^\n]+",header,re.M).group()+"\n"
     prefix+="\nvoid InitializeAliases() {"+"".join(initializers)+"}\n"
-    return prefix+function(read_source("src/Item/Item_EquipmentQueries.cpp",revision),"Item_CountWeaponGroupItems")+MAIN
+    return prefix+function(read_source("src/game/item/Item_EquipmentQueries.cpp",revision),"Item_CountWeaponGroupItems")+MAIN
 
 
 def main():

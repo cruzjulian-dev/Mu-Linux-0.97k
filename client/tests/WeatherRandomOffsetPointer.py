@@ -8,9 +8,15 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 using uint=unsigned int;
-char* DAT_07abf5d8;int DAT_083a3ff0;float DAT_081cb608[1];
+char* Hero;int EnableEvent;float DAT_081cb608[1];
 const float _DAT_00552900=300.0f,_DAT_00552ab8=1000.0f;
 unsigned trial,randomAt;std::vector<DWORD> actual;
 DWORD Bits(float f){DWORD b;std::memcpy(&b,&f,4);return b;}
@@ -31,13 +37,13 @@ BLOCK
 '''
 MAIN=r'''
 std::uint64_t Run(BYTE* memory){
- DAT_07abf5d8=reinterpret_cast<char*>(memory+16);
+ Hero=reinterpret_cast<char*>(memory+16);
  std::uint64_t hash=14695981039346656037ull;unsigned count=0,coverage=0;
  for(int world:{-1,0,10,11})for(int rain:{0,1})for(trial=0;trial<=5000;++trial){
   for(unsigned i=0;i<128;++i)memory[i]=BYTE(i*37+trial);
   const float pos[]={float(int(trial)-2500)*.125f,float(int(trial)*3-512)*.25f,float(int(trial%32)-16)*.5f};
-  std::memcpy(DAT_07abf5d8+16,pos,12);BYTE before[128];std::memcpy(before,memory,128);
-  gMapManager.world=world;DAT_083a3ff0=rain;randomAt=0;actual.clear();std::vector<DWORD> wanted;unsigned used=0;
+  std::memcpy(Hero+16,pos,12);BYTE before[128];std::memcpy(before,memory,128);
+  gMapManager.world=world;EnableEvent=rain;randomAt=0;actual.clear();std::vector<DWORD> wanted;unsigned used=0;
   auto random=[&](){int r=Random(used++);wanted.insert(wanted.end(),{1,DWORD(r)});return r;};
   auto effect=[&](int type,int sub,float x,float y,float z){wanted.insert(wanted.end(),{3,DWORD(type),DWORD(sub),Bits(x),Bits(y),Bits(z),0,0,0,Bits(1),Bits(1),Bits(1)});};
   if(rain){
@@ -66,10 +72,10 @@ int main(){
 }
 '''
 def harness(revision=None):
-    source=read_source('src/Render/Weather.cpp',revision)
+    source=read_source('src/render/Weather.cpp',revision)
     begin=source.index('\n',source.index('// ── Weather-mode:'))+1
     end=source.index('    // Get terrain tile',begin)
-    frame=re.search(r'    float\s+__fr\[12\][\s\S]*?&fStack_c\s*= __fr\[11\];',source).group()
+    frame=optional_definition(re.search(r'    float\s+__fr\[12\][\s\S]*?&fStack_c\s*= __fr\[11\];',source))
     return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES.replace('FRAME',frame).replace('BLOCK',source[begin:end])+MAIN
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--architecture',choices=('Win32','x64'),default='x64');p.add_argument('--generator');p.add_argument('--reference-ref');args=p.parse_args()

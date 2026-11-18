@@ -16,17 +16,61 @@ from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from legacy_fields import lower
+from legacy_fields import lower_names
 import re
 import subprocess
 import tempfile
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def dialog_messages(revision=None):
+    # S16: los estados de ErrorMessage son el enum DialogMessage.  Las
+    # revisiones anteriores no tienen el header y usan los literales.
+    try:
+        text = read_source("src/ui/DialogMessage.h", revision)
+    except Exception:
+        return ""
+    return text.replace("#pragma once", "") + "\n"
+
+
+def object_creation_module(revision=None):
+    # S13: CreateObject delega los valores por mapa en WorldObject_Behavior.cpp.
+    # Devuelve las declaraciones del header y la sección de creación del módulo,
+    # o "" en las revisiones que no lo tienen.
+    try:
+        header = read_source("src/scenes/WorldObject_Behavior.h", revision)
+        module = read_source("src/scenes/WorldObject_Behavior.cpp", revision)
+    except Exception:
+        return ""
+    marker = "// Creación: valores iniciales por mapa y tipo"
+    if marker not in module:
+        return ""
+    header = "\n".join(line for line in header.split("\n")
+                       if not line.startswith("#") and "struct OBJECT;" not in line
+                       and "WorldObject_PerMapTick" not in line)
+    return header + "\n// " + module[module.index(marker):] + "\n"
+
+
+def index_any(source, needles, start=0):
+    # La primera de las variantes que aparezca: literal (revisión vieja) o nombre.
+    for needle in needles:
+        i = source.find(needle, start)
+        if i >= 0:
+            return i
+    raise ValueError(f"no aparece ninguna de {needles}")
 
 
 def read_source(path, revision=None):
     if revision:
-        return subprocess.check_output(
-            ["git", "show", f"{revision}:{path}"], cwd=ROOT).decode("utf-8")
+        from source_paths import show   # E3: prueba la ruta vieja si se movió
+        return show(ROOT, revision, path)
     return lower((ROOT / path).read_text(encoding="utf-8"))
 
 
@@ -68,10 +112,16 @@ using undefined4 = std::uint32_t;
 struct OBJECT;
 OBJECT* AsObject(void* p) { return static_cast<OBJECT*>(p); }
 OBJECT* AsObject(std::uintptr_t p) { return reinterpret_cast<OBJECT*>(p); }
-struct Map { int world; int GetCurrentMap() const { return world; } } gMapManager;
+MAP_INFO_STUB
+struct Map {
+    int world;
+    int GetCurrentMap() const { return world; }
+    MapInfoStub Current() const { return MapInfoFor(world); }
+    MapInfoStub Info(int map) const { return MapInfoFor(map); }
+} gMapManager;
 float WorldTime;
-int HeroTile, SceneFlag, CameraWalkCut, CurrentCameraCount, DAT_07e11d30;
-DWORD DAT_05828d58;
+int HeroTile, SceneFlag, CameraWalkCut, CurrentCameraCount, EditFlag;
+DWORD Models;
 alignas(16) char hero[0x1bc];
 char* Hero = hero;
 float terrain[3];
@@ -112,10 +162,24 @@ void* Reserve(std::uintptr_t address, std::size_t size) {
     return p == MAP_FAILED ? nullptr : p;
 #endif
 }
-#define Models DAT_05828d58
-#define EditFlag DAT_07e11d30
 #define LODWORD(x) (*reinterpret_cast<std::uint32_t*>(&(x)))
 '''
+
+# Propiedades de mapa que el cliente lee de Content/map/maps.toml
+# (gMapManager.Current()). Los stubs de gMapManager las arman con las reglas
+# vanilla, las mismas que verifica MapInfoPointer.
+MAP_INFO_STUB = r'''
+struct MapInfoStub {
+    int world;
+    bool mountFlies, autoAttack, weather, swimmable;
+    bool IsIndoor(int t) const { return (world == 0 && t == 4) || (world == 2 && (t == 3 || t >= 10)); }
+};
+inline MapInfoStub MapInfoFor(int w)
+{
+    return { w, w == 8 || w == 10, w != 6, w == 0 || w == 2 || w == 3 || w == 7 || w == 9 || w == 10, w == 7 };
+}
+'''
+PREAMBLE = PREAMBLE.replace("MAP_INFO_STUB", MAP_INFO_STUB)
 
 MAIN = r'''
 template<class T> void Put(char* p, int offset, T value) {
@@ -135,7 +199,7 @@ std::uint64_t Run(char* object, char* models) {
         SceneFlag = state == 0 ? 2 : state == 1 ? 4 : 5;
         CameraWalkCut = state & 1;
         CurrentCameraCount = 37;
-        DAT_07e11d30 = state == 3;
+        EditFlag = state == 3;
         WorldTime = state == 0 ? 512.0f : state == 1 ? 4001.0f : 9999.0f;
         Put(object, 2, static_cast<short>(type));
         Put(object, 16, 100.0f); Put(object, 20, 200.0f);
@@ -190,36 +254,49 @@ int main() {
 def harness(revision=None):
     header = read_source("src/globals.h", revision)
     globals_source = read_source("src/globals.cpp", revision)
-    declaration = re.search(r"extern [^;\n]*\bDAT_05828d58\s*;", header).group()
-    definition = re.search(r"^[^/\n]*\bDAT_05828d58\s*=\s*[^;]+;", globals_source, re.M).group()
+    declaration = optional_definition(re.search(r"extern [^;\n]*\bModels\s*;", header))
+    definition = re.search(r"^[^/\n]*\bModels\s*=\s*[^;]+;", globals_source, re.M).group()
     initializers = []
-    for path in ("src/Platform/ClientEntry.cpp", "src/Model/Model_Items.cpp"):
-        initializers.append(re.search(r"^[ \t]*DAT_05828d58\s*=\s*[^;]+;",
+    for path in ("src/platform/ClientEntry.cpp", "src/assets/model/PlayerModels.cpp"):
+        initializers.append(re.search(r"^[ \t]*Models\s*=\s*[^;]+;",
                                       read_source(path, revision), re.M).group())
-    validate = ('if(DAT_05828d58 != reinterpret_cast<std::uintptr_t>(models)) '
+    validate = ('if(Models != reinterpret_cast<std::uintptr_t>(models)) '
                 '{ std::fputs("Base Models truncada\\n", stderr); std::exit(1); }')
-    initialize = ('\nvoid* DAT_06f42a58;\nvoid InitializeModels(void* models) {'
+    initialize = ('\nvoid* DAT_06f42a58;\n#define ModelsDump DAT_06f42a58\nvoid InitializeModels(void* models) {'
                   'DAT_06f42a58 = models;' + initializers[0] + validate
-                  + 'DAT_05828d58 = 0;' + initializers[1] + validate + '}\n')
-    preamble = PREAMBLE.replace("DWORD DAT_05828d58;", declaration + definition)
-    scene = read_source("src/Scene/Scene_ObjectUpdate.cpp", revision)
+                  + 'Models = 0;' + initializers[1] + validate + '}\n')
+    preamble = PREAMBLE.replace("DWORD Models;", declaration + definition)
+    scene = read_source("src/scenes/Scene_ObjectUpdate.cpp", revision)
     tick = function(scene, "FUN_004fdc00")
-    alpha = function(read_source("src/Render/Particle.cpp", revision), "Alpha")
-    physics = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision),
+    alpha = function(read_source("src/render/Particle.cpp", revision), "Alpha")
+    physics = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision),
                        "Effect_PhysicsTick")
-    ambient = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision),
-                       "FUN_0046c7f0")
-    angles = function(read_source("src/Math/Math_LegacyTransforms.cpp", revision), "AngleMatrix")
-    rotate = function(read_source("src/Math/Math_3D.cpp", revision), "Vector_Rotate")
-    start = scene.index("struct SceneFlamePreset {")
-    end = scene.index("} // namespace", start)
-    flames = scene[start:end]
+    ambient = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision),
+                       "WorldObject_EmitFireSmoke")
+    angles = function(read_source("src/game/math/Math_LegacyTransforms.cpp", revision), "AngleMatrix")
+    rotate = function(read_source("src/game/math/Math_3D.cpp", revision), "Vector_Rotate")
+    try:
+        # S12: las llamas y el resto del tick por mapa viven en WorldObject_Behavior.cpp.
+        behavior = read_source("src/scenes/WorldObject_Behavior.cpp", revision)
+    except Exception:
+        behavior = None
+    if behavior is not None:
+        flames = behavior[behavior.index("namespace {"):]
+        # La sección de creación (S13) no la usa este harness.
+        flames = flames.split("// ═", 1)[0]
+    else:
+        start = scene.index("struct SceneFlamePreset {")
+        end = scene.index("} // namespace", start)
+        flames = scene[start:end]
     call = "FUN_004fdc00(reinterpret_cast<OBJECT*>(object));"
     if "float o)" in tick:
         call = ("float bits; const auto address = static_cast<DWORD>("
                 "reinterpret_cast<std::uintptr_t>(object)); "
                 "std::memcpy(&bits, &address, 4); FUN_004fdc00(bits);")
-    return preamble + initialize + alpha + physics + angles + rotate + ambient + flames + tick + MAIN.replace("CALL_TICK", call)
+    # El harness usa memoria en layout x86 y OBJECT sin definir: los accesos por
+    # nombre pasan a offset crudo.
+    code = lower_names(alpha + physics + angles + rotate + ambient + flames + tick)
+    return preamble + initialize + code + MAIN.replace("CALL_TICK", call)
 
 
 # Layout x86 con el que trabajan los harnesses (memoria cruda con offsets de
@@ -233,9 +310,32 @@ HARNESS_LAYOUT = (
     "constexpr std::size_t ModelActionByte(std::size_t x86){return x86;}" + chr(10))
 
 
-def build_and_run(directory, source, args):
+def shared_names(source):
+    """Constantes de nombre que el código del cliente usa sin incluir nada.
+
+    Las funciones que se copian al harness referencian MAP_* / IsBloodCastleMap
+    (game/core/MapNumber.h) y los ids de efecto (render/EffectIds.h); en el
+    cliente llegan por MapManager.h y functions.h. Se copian los headers reales
+    para no tener que mantener una lista aparte.
+    """
+    text = ""
+    for header, marker in (("src/game/core/MapNumber.h", "enum eMapNumber"),
+                           ("src/render/EffectIds.h", "constexpr int BITMAP_")):
+        path = ROOT / header
+        if marker in source or not path.exists():
+            continue
+        body = path.read_text(encoding="utf-8").replace("#pragma once", "")
+        text += body + chr(10)
+    return text
+
+
+def build_and_run(directory, source, args, files=None):
     directory.mkdir()
-    layout = HARNESS_LAYOUT
+    # Archivos que el binario lee relativos a su directorio de trabajo (p. ej. Content/...).
+    for name, data in (files or {}).items():
+        (directory / name).parent.mkdir(parents=True, exist_ok=True)
+        (directory / name).write_bytes(data)
+    layout = HARNESS_LAYOUT + shared_names(source)
     if "ModelTypes.h" in source:   # el header real ya define BMD_STRIDE/BMD_FIELD_SHIFT
         layout = layout.replace(",BMD_STRIDE=188,BMD_FIELD_SHIFT=0", "")
         layout = layout.replace("constexpr std::size_t ModelActionByte(std::size_t x86){return x86;}" + chr(10), "")

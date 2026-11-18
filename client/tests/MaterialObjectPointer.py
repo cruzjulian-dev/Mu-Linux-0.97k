@@ -13,6 +13,12 @@ import tempfile
 from ItemResetPointer import harness as reset_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 int worldValue;
 struct Map { int GetCurrentMap() { return worldValue; } } gMapManager;
@@ -52,9 +58,9 @@ std::uint64_t RunMaterials(BYTE* memory) {
         int expectedDraws=0;
         if(model==414 || model==567) expected.attribute[0]=randomValues[expectedDraws++];
         else if(model==565 || model==606) { expected.attribute[0]=randomValues[expectedDraws++]; expected.attribute[1]=randomValues[expectedDraws++]; }
-        if(beforeAlpha>_DAT_005524f8 && (model==607 || model==608)) {
-            expected.v=static_cast<float>(randomValues[expectedDraws++]%10)*_DAT_005524f4;
-            expected.u=static_cast<float>(randomValues[expectedDraws++]%10)*_DAT_005524f4;
+        if(beforeAlpha>0.01f && (model==607 || model==608)) {
+            expected.v=static_cast<float>(randomValues[expectedDraws++]%10)*0.1f;
+            expected.u=static_cast<float>(randomValues[expectedDraws++]%10)*0.1f;
         }
         Require(randomIndex==expectedDraws && actual.model==expected.model && std::memcmp(actual.attribute,expected.attribute,sizeof(expected.attribute))==0);
         Require(std::memcmp(&actual.u,&expected.u,4)==0 && std::memcmp(&actual.v,&expected.v,4)==0 && std::memcmp(&actual.alpha,&alpha,4)==0 && actual.action==beforeAction);
@@ -64,10 +70,10 @@ std::uint64_t RunMaterials(BYTE* memory) {
         const short tickTypes[]={23,19,20,3,4,0,239}; object->Type=tickTypes[trial%7];
         std::memcpy(&object->Alpha,&alpha,4); object->RenderType=trial%3==0?0x80:0;
         object->HiddenMesh=trial%5==0?-2:trial%5==1?-1:0;
-        worldValue=trial%2==0?4:0; DAT_07e11d30=trial%4==0?0:1;
+        worldValue=trial%2==0?4:0; EditFlag=trial%4==0?0:1;
         OBJECT before; std::memcpy(&before,object,sizeof(before)); MaterialVisualSample sampleBefore=actual;
         randomIndex=0;
-        const bool expectedTick=worldValue==4 && !(object->Alpha<_DAT_005524f8) && object->RenderType!=0x80 && !(DAT_07e11d30==0 && object->HiddenMesh==-2) && object->Type!=0 && object->Type!=239;
+        const bool expectedTick=worldValue==4 && !(object->Alpha<0.01f) && object->RenderType!=0x80 && !(EditFlag==0 && object->HiddenMesh==-2) && object->Type!=0 && object->Type!=239;
         Tick(object); Require(randomIndex==(expectedTick?1:0) && std::memcmp(object,&before,sizeof(before))==0);
         Require(std::memcmp(&actual,&sampleBefore,sizeof(actual))==0 && current==&outer);
         for(int i=0;i<16;++i) Require(memory[i]==0x5a && memory[16+sizeof(OBJECT)+i]==0x5a);
@@ -99,8 +105,8 @@ def harness(revision=None):
     if fake not in prefix:
         raise ValueError("No se encontró el getter controlado del fixture")
     prefix=prefix.replace(fake,"")+"\n#include <unordered_map>\n"
-    header=read_source("src/Render/MaterialVisuals.h",revision)
-    source=read_source("src/Render/MaterialVisuals.cpp",revision)
+    header=read_source("src/render/MaterialVisuals.h",revision)
+    source=read_source("src/render/MaterialVisuals.cpp",revision)
     prefix+=re.search(r"class MaterialVisualScope\s*\{.*?\n\};",header,re.S).group()
     prefix+=re.search(r"struct ObjectSample\s*\{.*?\};",source,re.S).group()
     prefix+=re.search(r"^const MaterialVisualSample \*current[^;]+;",source,re.M).group()
@@ -108,11 +114,11 @@ def harness(revision=None):
     prefix+=re.search(r"^const MaterialVisualSample \*MaterialVisuals_Current\([^\n]+",source,re.M).group()
     prefix+="\n".join(re.findall(r"^MaterialVisualScope::[^\n]+",source,re.M))
     globals_header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
-    for name in ("_DAT_005524f8","DAT_07e11d30"):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",globals_header).group()
-        prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
+    for name in ("EditFlag",):
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",globals_header))
+        prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
     prefix+=SERVICES
-    reset=read_source("src/Entity/Entity_Reset.cpp",revision)
+    reset=read_source("src/game/entity/Entity_Reset.cpp",revision)
     for name in ("ItemObjectAttributeImpl","ItemObjectAttributeForRender"):
         prefix+=function(reset,name)
     prepare=function(source,"MaterialVisuals_PrepareWeaponObject"); tick=function(source,"MaterialVisuals_TickObjectDraw")

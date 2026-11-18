@@ -8,11 +8,11 @@ from ObjectLayoutContract import record
 
 
 def production():
-    source = read_source("src/Scene/Scene_EntityLifecycle.cpp")
+    source = read_source("src/scenes/Scene_EntityLifecycle.cpp")
     prefix = source.split("// common initialisation", 1)[0] + "return puVar3; }\n"
     create = function(prefix, "CreateObject")
-    unlink = function(read_source("src/Scene/Scene_LegacyHelpers.cpp"), "Entity_GridUnlink")
-    unload = function(read_source("src/Render/SMD_Parser.cpp"), "DeleteObjects")
+    unlink = function(read_source("src/scenes/Scene_LegacyHelpers.cpp"), "Entity_GridUnlink")
+    unload = function(read_source("src/render/SMD_Parser.cpp"), "DeleteObjects")
     return create + unlink + unload
 
 
@@ -31,7 +31,7 @@ static unsigned nextSlot;
 static bool registered[16], freed[16];
 static std::vector<unsigned> events;
 static float _DAT_00552d20 = 0.000625f;
-static DWORD DAT_05828d58 = 0x1000;
+static DWORD Models = 0x1000;
 static unsigned char DAT_083a2370[120];
 static std::uintptr_t g_OperateObjects[200];   // punteros de los operables (DeleteObjects los limpia)
 unsigned Slot(const void* p) {
@@ -111,8 +111,8 @@ void Run(unsigned cell, unsigned order) {
 
 def harness():
     reference = read_source("tests/fixtures/scene-grid-lifecycle-x86.inc")
-    header = read_source("src/Scene/SceneObjectCell.h").replace("#pragma once", "")
-    types = read_source("src/Entity/EntityTypes.h")
+    header = read_source("src/scenes/SceneObjectCell.h").replace("#pragma once", "")
+    types = read_source("src/game/entity/EntityTypes.h")
     types = ("using WORD=std::uint16_t; using vec3_t=float[3]; using vec34_t=float[3][4];\n"
              "#pragma pack(push,1)\n" + record(types, "OBJECT") +
              "\n#pragma pack(pop)\nOBJECT* AsObject(void* p){return static_cast<OBJECT*>(p);}\n")

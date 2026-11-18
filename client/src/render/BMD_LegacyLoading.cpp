@@ -1,0 +1,416 @@
+// Carga de modelos y texturas: OpenModel / AccessModel / OpenTexture, la
+// cadena SMD (OpenSMDModel / OpenSMDAnimation) y el tokenizer de texto de los
+// data parsers (TextParser_GetToken).
+
+#include "stdafx.h"
+#include "assets/model/ModelTypes.h"
+#include "assets/model/SmdImport.h"
+#include "render/ResourceTables.h"
+#include "platform/Text.h"
+#include "platform/IWindow.h"
+#include "globals.h"
+#include "functions.h"
+#include "net/Net.h"
+
+extern void __cdecl operator_delete(void* ptr);
+
+// Monster_LoadScriptTable — implemented in src/assets/data/Monster_Data.cpp
+// Monster_ParseSetBase2 — implemented in src/assets/data/Monster_Data.cpp
+// IDA: SetMaxTextures (0x00505BD0)
+// SetMaxTextures / Model_SetSlotIndex(index): sets active model slot index.
+void __cdecl SetMaxTextures(int param_1) {
+    TextureBegin = 0;
+    TextureCurrent = param_1;
+}
+// IDA: OpenModel (0x00505E90)
+// OpenModel(Type, Dir, ModelFileName, ...).
+// Port FIEL del IDA (raw 0x505E90):
+//   1. FileName = Dir + ModelFileName
+//   2. Itera variadic args (extra animation .smd paths) hasta NULL o "end"
+//   3. Si v11>0: OpenSMDModel(Type, FileName, v11, unk_83A4100) +
+//      OpenSMDAnimation(Type, FileNameN, lockFlag) por cada N
+//   4. Si v11==0: OpenSMDModel(Type, FileName, 1, unk_83A4100) +
+//      OpenSMDAnimation(Type, FileName, 0)
+//
+// NOTA: los archivos Data2/Item/<class>/<file>.smd NO existen en el
+// filesystem distribuido (solo Data/Item/<file>.bmd está). Las llamadas a
+// fopen dentro de OpenSMDModel/OpenSMDAnimation retornarán NULL → early return →
+// no-op silencioso. El path BMD (AccessModel) cubre la carga real de items.
+// (OpenSMDModel, OpenSMDAnimation — declared via functions.h.
+//  DAT_083a4100 — declared in globals.h.)
+
+// OpenMonsterModel — implemented in src/assets/data/Monster_Data.cpp
+// FUN_0047A1F0 @ 0x0047A1F0 — TextParser_GetToken: tokenizer for all game data files
+// (Monster.txt / Item.txt / Skill.txt / NPC.txt / Gate.txt / Filter.txt).
+//
+// Ported from IDA Hex-Rays (610 bytes). Reads from `SMDFile` (DAT_0055c0a0),
+// stores result in TokenString / TokenNumber / CurrentToken globals.
+//
+// Returns:
+//   0   = identifier (alpha[alnum/./_]*) — stored in TokenString
+//   1   = number (atof(buf)) — stored in TokenNumber (ParserTokenNumber)
+//   2   = EOF (0xFF byte read)
+//   '#' = literal hash
+//   ',' = literal comma
+//   ';' = literal semicolon
+//   '{' / '}' = brace literals
+//   '<' (60) = unrecognized character
+//   string-literal "…" handled like identifier (sets CurrentToken=0, returns 0)
+//
+// Uses CRT helpers fgetc/getc/ungetc/isspace/isalpha/isalnum/isdigit/atof —
+// all available in stdafx-included <cctype>/<cstdio>/<cstdlib>.
+int __cdecl TextParser_GetToken(void)
+{
+    // Usa TextParserTokenString (TokenString = 0x07CF1EF0), NO ParserTokenString,
+    // que es el buffer del OTRO tokenizer (Parse_NextToken / OpenWorldModels).
+    char* TokenStringBuf = (char*)&TextParserTokenString[0];
+    int&   CurrentToken  = ParserCurrentToken;
+    float& TokenNumber   = ParserTokenNumber;
+
+    // Los data parsers (Item_Data, Monster_Data, Skill_Data, Filter_Data,
+    // NPC_Data, Gate_Data) abren su archivo vía SMDFile_0.
+    // El otro símbolo "SMDFile" en DAT_0055c0a0 es un global distinto mal
+    // nombrado — no se usa acá.
+    FILE* fp = SMDFile_0;
+
+    char  TempString[100];
+    int   cha;
+    char* p;
+
+    TokenStringBuf[0] = 0;
+    if (!fp) return 2;
+
+    cha = fgetc(fp);
+    if ((char)cha == (char)0xFF || cha == EOF) return 2;
+
+    // Skip comments (// … \n) and whitespace
+    while (1) {
+        if ((char)cha == '/') {
+            cha = fgetc(fp);
+            if ((char)cha == '/') {
+                do { cha = fgetc(fp); }
+                while ((char)cha != '\n' && cha != EOF);
+            }
+        }
+        if (cha == EOF) return 2;
+        if (!isspace((unsigned char)cha)) break;
+        cha = fgetc(fp);
+        if ((char)cha == (char)0xFF || cha == EOF) return 2;
+    }
+
+    int result;
+    switch ((char)cha) {
+    case '"':
+        // Quoted string — read until closing quote, save into TokenString
+        p = TokenStringBuf;
+        for (cha = getc(fp); cha != EOF && (char)cha != (char)0xFF; cha = getc(fp)) {
+            if ((char)cha == '"') break;
+            *p++ = (char)cha;
+        }
+        if ((char)cha == (char)0xFF || cha == EOF) ungetc(cha, fp);
+        *p = 0;
+        CurrentToken = 0;
+        return 0;
+
+    case '#': result = 35;  CurrentToken = 35;  break;
+    case ',': result = 44;  CurrentToken = 44;  break;
+    case ';': result = 59;  CurrentToken = 59;  break;
+    case '{': result = 123; CurrentToken = 123; break;
+    case '}': result = 125; CurrentToken = 125; break;
+
+    case '-': case '.':
+    case '0': case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7': case '8': case '9':
+        ungetc(cha, fp);
+        p = TempString;
+        for (cha = getc(fp); cha != EOF && (char)cha != (char)0xFF; cha = getc(fp)) {
+            if ((char)cha != '.' && !isdigit((unsigned char)cha) && (char)cha != '-') break;
+            *p++ = (char)cha;
+        }
+        ungetc(cha, fp);
+        *p = 0;
+        TokenNumber = (float)atof(TempString);
+        CurrentToken = 1;
+        return 1;
+
+    default:
+        if (isalpha((unsigned char)cha)) {
+            TokenStringBuf[0] = (char)cha;
+            p = &TokenStringBuf[1];
+            for (cha = getc(fp); cha != EOF && cha != -1; cha = getc(fp)) {
+                char c2 = (char)cha;
+                if (c2 != '.' && c2 != '_' && !isalnum((unsigned char)cha)) break;
+                *p++ = c2;
+            }
+            ungetc(cha, fp);
+            *p = 0;
+            CurrentToken = 0;
+            return 0;
+        } else {
+            CurrentToken = 60;
+            return 60;
+        }
+    }
+    return result;
+}
+
+// crt_fwrite @ 0x005430F0 — fwrite wrapper (with lock).
+uint __cdecl crt_fwrite(char *buf, uint size, uint count, int *fp) {
+    return (uint)fwrite(buf, size, count, (FILE *)fp);
+}
+// AccessModel @ 0x005060B0 — Model_LoadBMD_ByIdx(slot, dir, basename, idx): loads BMD file at slot.
+// Construye leafname "basename.bmd" (idx==-1), "basename0N.bmd" (idx<10) o
+// "basenameNN.bmd" (idx>=10), usando param_3 (BASENAME) — NO param_2 (directorio).
+// param_2 (directorio "Data/Logo/") se pasa aparte al loader BMD.
+// BUG PREVIO: el sprintf pasaba param_2 en vez de param_3 → el filename quedaba
+// "Data/Logo/01.bmd" en vez de "Logo01.bmd", los modelos de login/select nunca
+// cargaban y el fondo 3D del server select quedaba vacío.
+void __cdecl AccessModel(int param_1, const char *param_2, const char *param_3, int param_4) {
+    ResourceTables::EnsureModels(std::size_t(param_1)+1);
+    // DESVIACION: se bombea la message queue cada N llamadas para que OpenWorld
+    // (que llama esta función cientos de veces) no bloquee el message pump por
+    // 2+ segundos: el server MuEmu kickea por backpressure si no se consumen los
+    // packets que envía después del JoinMapServer.
+    {
+        static int s_pumpCounter = 0;
+        if ((s_pumpCounter++ & 0x07) == 0) {  // cada 8 BMDs
+            // ServiceEvents bombea SDL y drena el socket por poll; g_WorldLoading sigue
+            // difiriendo el despacho de paquetes hasta crear al héroe.
+            Platform::GetWindow().ServiceLoadingEvents(16);
+        }
+    }
+
+    char local_40[64];
+    if (param_4 == -1) {
+        crt_sprintf(local_40, "%s.bmd", param_3);
+    } else {
+        const char *pcVar1 = (param_4 < 10) ? "%s0%d.bmd" : "%s%d.bmd";
+        crt_sprintf(local_40, pcVar1, param_3, param_4);
+    }
+    BMD* model = AsModel(Models) + param_1;
+    int numBonesInSlot = model->NumBones;
+    if (DAT_0055a7c4 == '\0') {
+        // HQ path original: si el SMD ya cargó bones, BMD__Save agrega la anim BMD.
+        // DESVIACION: los .smd no existen en el cliente distribuido (ver OpenModel), así
+        // que si el slot no tiene bones se cae al loader completo BMD__Open para traer
+        // la geometría BMD.
+        if (numBonesInSlot > 0)
+            BMD__Save((intptr_t)model, (char*)param_2, local_40);
+        else
+            BMD__Open(model, param_2, local_40, 0);
+    } else {
+        BMD__Open(model, param_2, local_40, 0);
+    }
+
+    // Post-load defensive init: ensure bodyLight is (1,1,1) even if the BMD
+    // load path bypassed BMD::Open (e.g. SMD-first HQ path). Without this the
+    // login-scene slots retain the 0xF5F5F5F5 pool-fill garbage pattern at
+    // +0x50, which manifests as white/yellow/corrupt triangles on Ship/Logos.
+    {
+        model->BodyLight[0] = 1.0f;
+        model->BodyLight[1] = 1.0f;
+        model->BodyLight[2] = 1.0f;
+    }
+}
+// Forward-declare FindTextureByName (implementada en src/app/core/Runtime_Medium.cpp).
+int __cdecl FindTextureByName(char *Name, char **dwTexture);
+
+// IDA: OpenTexture (0x00505C80)
+// ── OpenTexture (Model_LoadTextures) ────────────────────────────────────────
+// Para cada mesh del modelo en slot [Model]:
+//   1) Lee el nombre de textura (32 bytes) desde pBMD->Data[+0x34] + i*0x20.
+//   2) FindTextureByName — si ya está cargada, reusa e incrementa ref-count.
+//   3) Si no: construye "SubFolder + name", llama OpenTGA (.t*) u OpenJPG (.*),
+//      copia el nombre al slot de Bitmaps, e incrementa TextureCurrent.
+//   4) Guarda el slot resuelto en pBMD->Data[+0x38] + i*2 (IndexTexture[i]).
+//   5) Overrides por prefijo de filename: "ski*"/"level*" → 0x12d (BITMAP_SKIN),
+//      "hid*" → 300 (BITMAP_HIDE).
+//
+// Sin esta función, IndexTexture queda sin inicializar (0xCDCD en MSVC Debug)
+// y BMD_DrawMesh hace BindTexture con un id basura → naves/logos aparecen
+// blancos o con textura corrupta. Verificado via debug.log (tex=0xffffcdcd).
+//
+// Globals:
+//   Models            = DAT_05828d58 (BMD table, stride 0xBC; Data ptr at +0x00)
+//   TextureBegin      = TextureBegin (int, lower bound del scan)
+//   TextureCurrent    = TextureCurrent (int, next-free slot)
+//   Bitmaps[]         = g_BitmapsRaw (stride 0x38; filename en [+0x00..+0x1F])
+//   DAT_0055a7a4      = base path "Data2\"   (Data2/pak mode)
+//   DAT_0055a79c      = base path "Data\"    (Data mode)
+void __cdecl OpenTexture(int Model, const char* SubFolder, int Type, char Check) {
+    // El Model slot ES la estructura BMD completa (stride 0xBC), NO un puntero a
+    // datos. Los primeros 32 bytes del slot son el Name (string), no un data ptr.
+    // Los contadores y tablas están inline:
+    //    slot +0x24 short  numMeshes
+    //    slot +0x34 char*  texNameTable (char[n][0x20])
+    //    slot +0x38 short* indexTexture (short[n])
+    // Verificado en BMD__Open (BMD::Open): this[0x24]=numMeshes,
+    // this[0x34]=texName[] y this[0x38]=indexTex[] se asignan directamente.
+    char* slot = (char*)(Models + Model * BMD_STRIDE);
+    short numMeshes = *(short*)(slot + 0x24);
+    // DIAG-canary inconditional: confirmar que llegamos a la función para Ship/Logo
+    {
+        static int s_oc_any = 0;
+        if (s_oc_any < 8) {
+            s_oc_any++;
+        }
+    }
+    // DIAG: log ENTRY for login-scene slots (Ship=0x3c, Logos=0xa0..0xa3).
+    {
+        static int s_oc = 0;
+        bool isLoginSlot = (Model == 0x3c || (Model >= 0xa0 && Model <= 0xa3));
+        if (isLoginSlot && s_oc < 20) {
+            char* texNameTable0 = *(char**)&((BMD*)(uintptr_t)(slot))->Textures;
+            short* indexTexture0 = *(short**)&((BMD*)(uintptr_t)(slot))->IndexTexture;
+            char firstName[33] = {0};
+            if (texNameTable0 && numMeshes > 0) {
+                memcpy(firstName, texNameTable0, 32);
+                firstName[32] = 0;
+            }
+            s_oc++;
+        }
+    }
+    if (numMeshes <= 0) return;
+
+    char* texNameTable  = *(char**)&((BMD*)(uintptr_t)(slot))->Textures;
+    short* indexTexture = *(short**)&((BMD*)(uintptr_t)(slot))->IndexTexture;
+    if (!texNameTable || !indexTexture) return;
+
+    for (int i = 0; i < numMeshes; i++) {
+        char* Name = texNameTable + i * 0x20;
+        char* pSlot = nullptr;
+        int foundIdx = FindTextureByName(Name, &pSlot);
+        int resolvedIdx;
+
+        if (foundIdx < 0) {
+            // Miss: load texture from disk into new slot
+            // Locate '.' to detect extension
+            int nameLen = (int)strnlen(Name, 32);
+            int dotPos = 0;
+            for (int k = 0; k < nameLen; k++) { if (Name[k] == '.') { dotPos = k; break; } }
+
+            // Build full path: SubFolder + Name  (into local_40)
+            // Si Name ya contiene un path (ej. "Data\Npc\foo.OZT", como guardan algunos
+            // BMDs de NPC), NO concatenar SubFolder — saldría "Data\Npc\Data\Npc\foo.OZT"
+            // → fopen FAIL. Path absoluto = arranca con "Data\" o "Data/" o contiene
+            // '\\' o '/' antes del primer '.'.
+            char local_40[128];
+            size_t nlen = strnlen(Name, 32);
+            bool nameHasPath = false;
+            for (size_t k = 0; k < nlen; ++k) {
+                char ch = Name[k];
+                if (ch == '\\' || ch == '/') { nameHasPath = true; break; }
+                if (ch == '.') break;   // extension; stop scanning
+            }
+            if (nameHasPath) {
+                if (nlen > sizeof(local_40) - 1) nlen = sizeof(local_40) - 1;
+                memcpy(local_40, Name, nlen);
+                local_40[nlen] = 0;
+            } else {
+                size_t slen = strlen(SubFolder);
+                if (slen > 63) slen = 63;
+                memcpy(local_40, SubFolder, slen);
+                local_40[slen] = 0;
+                if (slen + nlen > sizeof(local_40) - 1) nlen = sizeof(local_40) - 1 - slen;
+                memcpy(local_40 + slen, Name, nlen);
+                local_40[slen + nlen] = 0;
+            }
+
+            // Dispatch by extension character (tolower'd)
+            int extChar = (dotPos + 1 < nameLen) ? tolower((unsigned char)Name[dotPos + 1]) : 'j';
+            int slot = (int)TextureCurrent;  // TextureCurrent
+            ResourceTables::EnsureTextures(std::size_t(slot)+1);
+            if (extChar == 't')
+                OpenTGA(local_40, slot, 0x2600, 0x2901, 0, Check);   // OpenTGA
+            else
+                OpenJPG(local_40, slot, Type,   0x2901, 0, Check);   // OpenJPG/OZJ
+
+            // Store filename into the Bitmaps slot (first 32 bytes)
+            char* slotBase = &g_BitmapsRaw[slot * TEXTURE_STRIDE];
+            size_t fnLen = strnlen(Name, 32);
+            memcpy(slotBase, Name, fnLen);
+            if (fnLen < 32) memset(slotBase + fnLen, 0, 32 - fnLen);
+
+            resolvedIdx = slot;
+            TextureCurrent = slot + 1;   // TextureCurrent++
+        } else {
+            // Hit: reuse existing slot, bump ref count at +0x30
+            if (pSlot != nullptr) {
+                *(unsigned char*)(pSlot + 0x30) += 1;
+            }
+            resolvedIdx = foundIdx;
+        }
+
+        // Write resolved index into IndexTexture[i]
+        indexTexture[i] = (short)resolvedIdx;
+
+        // Special name overrides
+        char c0 = Name[0], c1 = Name[1], c2 = Name[2];
+        if (c0 == 's' && c1 == 'k' && c2 == 'i') {
+            indexTexture[i] = 0x12d;   // BITMAP_SKIN
+        } else if (c0 == 'l' && c1 == 'e' && c2 == 'v' && Name[3] == 'e' && Name[4] == 'l') {
+            indexTexture[i] = 0x12d;   // BITMAP_SKIN (level variant)
+        } else if (c0 == 'h' && c1 == 'i' && c2 == 'd') {
+            indexTexture[i] = 300;     // BITMAP_HIDE
+        }
+
+        // DIAG: log Ship (0x3c) mesh→texture mapping so we can see
+        // which mesh gets which texture slot and whether the BMD's texture
+        // name matched an existing slot or triggered a disk load.
+        if (Model == 0x3c) {
+            char safe[33] = {0};
+            memcpy(safe, Name, 32);
+            safe[32] = 0;
+            // sanitize non-printables
+            for (int q = 0; q < 32; q++) {
+                if (safe[q] && (safe[q] < 0x20 || safe[q] > 0x7e)) safe[q] = '?';
+            }
+            BITMAP_t* b = &Bitmaps[indexTexture[i]];
+        }
+    }
+}
+
+// Forward decls de la cadena de parseo SMD (definidas más abajo; los archivos
+// no existen en el filesystem, retornan false; mantienen la estructura del binario).
+extern "C" bool __cdecl OpenSMDFile(const char* FileName, int Type, char Flip);
+extern "C" void __cdecl FixupSMD(void);
+extern "C" void __cdecl SMD2BMDModel(int ID, int Actions);
+extern "C" void __cdecl SMD2BMDAnimation(int ID, char LockPosition);
+
+// OpenSMDModel @ 0x0040b280 — OpenSMDModel(ID, FileName, Actions, Flip)
+// Port FIEL del IDA (raw 0x40B280):
+//   if (Models[id].numMesh <= 0) {
+//     if (OpenSMDFile(FileName, 0, Flip)) {
+//       strcpy(Models[id], FileName);
+//       Models[id].byte32 = 10;
+//       FixupSMD();
+//       SMD2BMDModel(ID, Actions);
+//     }
+//   }
+void __cdecl OpenSMDModel(int ID, const char* FileName, int Actions, char Flip) {
+    ResourceTables::EnsureModels(std::size_t(ID)+1);
+    BMD* slot = AsModel(Models) + ID;
+    if (slot->NumMeshs > 0) return;  // Modelo ya cargado.
+    if (!OpenSMDFile(FileName, 0, Flip)) return;
+    strncpy(slot->Name, FileName, sizeof(slot->Name)-1);
+    slot->Name[sizeof(slot->Name)-1] = 0;
+    slot->Version = 10;
+    FixupSMD();
+    SMD2BMDModel(ID, Actions);
+}
+
+// OpenSMDAnimation @ 0x0040b310 — OpenSMDAnimation(ID, FileName, LockPosition)
+// Port FIEL del IDA (raw 0x40B310):
+//   if (Models[id].numAnims > 0) {
+//     OpenSMDFile(FileName, 1, 0);
+//     SMD2BMDAnimation(ID, LockPosition);
+//   }
+void __cdecl OpenSMDAnimation(int ID, const char* FileName, char LockPosition) {
+    ResourceTables::EnsureModels(std::size_t(ID)+1);
+    BMD* slot = AsModel(Models) + ID;
+    if (slot->NumBones <= 0) return;  // Conservar el gate por huesos del port.
+    // La cantidad de huesos pertenece al modelo elegido, no al último archivo leído.
+    if (!Smd::SelectModel(AsModel(Models)+ID)) return;
+    OpenSMDFile(FileName, 1, 0);
+    SMD2BMDAnimation(ID, LockPosition);
+}

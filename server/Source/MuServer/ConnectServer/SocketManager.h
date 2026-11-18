@@ -8,8 +8,12 @@
 #include <thread>
 #include <vector>
 
-#define MAX_MAIN_PACKET_SIZE 2048
-#define MAX_SIDE_PACKET_SIZE 2048
+// Un paquete del protocolo (C1/C2) entra en la cola del server: hasta 2048 bytes.
+#define MAX_PACKET_SIZE 2048
+// Los buffers del socket llevan además el registro del canal cifrado
+// (SecureLink): un paquete más SecureChannel::Overhead.
+#define MAX_MAIN_PACKET_SIZE 4096
+#define MAX_SIDE_PACKET_SIZE 16384
 #define MAX_SERVER_WORKER_THREAD 8
 #define MAX_IO_OPERATION 2
 #define IO_RECV 0
@@ -78,7 +82,13 @@ public:
 
 	bool DataRecv(int index, IO_MAIN_BUFFER* lpIoBuffer);
 
+	// Paquete del protocolo: va cifrado si la conexión tiene canal (SecureLink).
 	bool DataSend(int index, BYTE* lpMsg, int size);
+
+	// Bytes tal cual al socket, sin cifrar: sólo para el saludo del canal.
+	bool DataSendRaw(int index, const BYTE* data, int size);
+
+	bool SendBytes(int index, const BYTE* data, int size);
 
 	void Disconnect(int index);
 

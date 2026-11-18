@@ -1,14 +1,16 @@
 #pragma once
 
 #include "ServerDisplayer.h"
-
-void ErrorMessageBox(const char* message, ...);
-
-void LogAdd(eLogColor color, const char* text, ...);
+#include "UtilCommon.h"
+#include <string>
 
 void ConsoleProtocolLog(int type, BYTE* lpMsg, int size);
 
 void ConnectServerTimeoutProc();
+
+// Carpeta Data del server, con la barra final: la misma que usa el GameServer
+// (MU_DATA_PATH, /opt/mu/Data o ../Data).
+std::string GetDataPath();
 
 int GetFreeClientIndex();
 

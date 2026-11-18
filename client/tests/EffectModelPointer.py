@@ -13,9 +13,15 @@ from BmdSetupPointer import SERVICES
 from SceneObjectPointer import build_and_run, function, read_source
 from X86Views import model_view
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 EXTRA=r'''
 using byte=BYTE;
-std::uintptr_t DAT_05828d58;
+std::uintptr_t Models;
 float DAT_06970acc[12],DAT_06970afc[12],DAT_06970c4c[12],DAT_06970c7c[12];
 int currentMap;bool blocked;
 struct Map {int GetCurrentMap(){return currentMap;}}gMapManager;
@@ -36,7 +42,7 @@ MAIN=r'''
 template<class T>void Put(BYTE* p,T value){std::memcpy(p,&value,sizeof(value));}
 std::uint64_t Run(BYTE* memory,BYTE* entityMemory){
     constexpr unsigned tableBytes=1200*188+32;
-    DAT_05828d58=reinterpret_cast<std::uintptr_t>(memory+16);activeEntity=entityMemory+16;
+    Models=reinterpret_cast<std::uintptr_t>(memory+16);activeEntity=entityMemory+16;
     std::memset(memory,0xa5,tableBytes);eventDigest=14695981039346656037ull;events=0;
     const int models[]={419,431,471,506,546,570,607,608,671,676,703,708,735,740,767,772,790,865,958,543,957,0};
     for(unsigned trial=0;trial<8208;++trial){
@@ -72,14 +78,14 @@ def harness(revision=None):
     setup=function(read_source('tests/fixtures/BMDSetup-b0a02c59.cpp'),'BMD_SetupRenderByType')
     body=read_source('tests/fixtures/BodyColor-e3731d7c.cpp')
     color=function(body,'RenderPartObjectBodyColor')+function(body,'Entity_SetModelColorAlt')
-    effect=function(read_source('src/Render/Entity_DrawSetup.cpp',revision),'RenderPartObjectEffect')
+    effect=function(read_source('src/render/Entity_DrawSetup.cpp',revision),'RenderPartObjectEffect')
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x100000')
-    prefix+=re.search(r'enum eAntilag\s*\{.*?\};',read_source('src/Config/UserSettings.h',revision),re.S).group()+SERVICES+EXTRA
+    prefix+=re.search(r'enum eAntilag\s*\{.*?\};',read_source('src/app/config/UserSettings.h',revision),re.S).group()+SERVICES+EXTRA
     header,definitions=read_source('src/globals.h',revision),read_source('src/globals.cpp',revision)
     names=set(re.findall(r'_DAT_[0-9a-f]+',setup+effect));names.add('DAT_083a45d4')
     for name in sorted(names):
-        prefix+=re.search(rf'extern [^;\n]*\b{name}\s*;',header).group()
-        prefix+=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M).group()
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}\s*;',header))
+        prefix+=optional_definition(re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M))
     return prefix+model_view(['BodyLight','StreamMesh'],revision)+setup+color+effect+MAIN
 
 

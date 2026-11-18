@@ -62,7 +62,7 @@
 
     <div class="card-sub">
       <h3><%= t("Editor de items base") %></h3>
-      <p class="muted"><%= t("Edita") %> <code>Item.txt</code>, <code>ItemValue.txt</code> <%= t("y") %> <code>ItemStack.txt</code>.</p>
+      <p class="muted"><%= t("Edita") %> <code>Item.txt</code> <%= t("y el precio y el apilado de") %> <code>Data/Items</code>.</p>
       <a class="button-link" href="/admin/server-editor/items"><%= t("Abrir editor de items") %></a>
     </div>
 
@@ -82,6 +82,12 @@
       <h3><%= t("Editor de reset/exp") %></h3>
       <p class="muted"><%= t("Edita") %> <code>ResetTable.txt</code> <%= t("y") %> <code>ExperienceTable.txt</code>.</p>
       <a class="button-link" href="/admin/server-editor/reset-exp"><%= t("Abrir editor de reset/exp") %></a>
+    </div>
+
+    <div class="card-sub">
+      <h3><%= t("Editor por mapa") %></h3>
+      <p class="muted"><%= t("Edita los archivos de cada mapa en") %> <code>Data/Maps</code> <%= t("(reglas, spawns, drops, gates y zonas).") %> <%= t("Los spawns también sobre el mapa.") %></p>
+      <a class="button-link" href="/admin/server-editor/map-folders"><%= t("Abrir editor por mapa") %></a>
     </div>
 
     <div class="card-sub">
@@ -130,6 +136,12 @@
       <h3><%= t("CFG skills") %></h3>
       <p class="muted"><%= t("Edita") %> <code>GameServerInfo - Skill.dat</code>.</p>
       <a class="button-link" href="/admin/server-editor/skills"><%= t("Abrir CFG skills") %></a>
+    </div>
+
+    <div class="card-sub">
+      <h3><%= t("Invocaciones") %></h3>
+      <p class="muted"><%= t("Monstruo de cada nivel del Orbe de Invocación y cuánto escala con la elfa.") %></p>
+      <a class="button-link" href="/admin/server-editor/summons"><%= t("Abrir invocaciones") %></a>
     </div>
 
     <div class="card-sub">

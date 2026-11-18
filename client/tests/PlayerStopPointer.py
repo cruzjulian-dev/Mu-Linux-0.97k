@@ -12,7 +12,13 @@ import re
 import tempfile
 
 from SoundPointer import harness as sound_harness
-from SceneObjectPointer import build_and_run, function, read_source
+from SceneObjectPointer import MAP_INFO_STUB, build_and_run, function, read_source
+
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
 
 OBJECT_RECORD = r'''
 #ifndef _WIN32
@@ -57,10 +63,14 @@ using uint = unsigned int;
 SERVICES = r'''
 int SceneFlag;
 BYTE DAT_0838bc70[0x10000];
+#define TerrainWall DAT_0838bc70
+MAP_INFO_STUB
 struct Map {
     int world; bool swimming;
     int GetCurrentMap() const { return world; }
     bool IsSwimmable(int value) const { Require(value == world); return swimming; }
+    MapInfoStub Current() const { return MapInfoFor(world); }
+    MapInfoStub Info(int map) const { return MapInfoFor(map); }
 } gMapManager;
 int randomValues[2], randomDraws, terrainCalls;
 int NextRandom() { Require(randomDraws < 2); return randomValues[randomDraws++]; }
@@ -69,11 +79,12 @@ std::uint32_t seed;
 std::uint32_t Input() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
 template<class T, std::size_t N> T Pick(const T (&values)[N]) { return values[Input() % N]; }
 '''
+SERVICES = SERVICES.replace("MAP_INFO_STUB", MAP_INFO_STUB)
 
 MAIN = r'''
 void Call(CHARACTER* character) { CALL_STOP; }
 std::uint64_t Run(CHARACTER* character, BYTE* models, BYTE* items, unsigned displacement) {
-    DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models);
+    Models = reinterpret_cast<std::uintptr_t>(models);
     DAT_055c9e44 = reinterpret_cast<std::uintptr_t>(items);
     DAT_07d78068 = DAT_055c9e44 + displacement * 64;
     Require(ItemAttribute_Base() == DAT_07d78068);
@@ -173,7 +184,7 @@ int main() {
 
 def harness(revision=None):
     prefix = sound_harness(revision).split("HRESULT CallPlay(", 1)[0].replace("0x10000", "0x100000")
-    types = read_source("src/Entity/EntityTypes.h", revision)
+    types = read_source("src/game/entity/EntityTypes.h", revision)
     record = OBJECT_RECORD
     for token, name, kind in (("TYPE_FIELD", "Type", "short"), ("SUBTYPE_FIELD", "SubType", "int"),
                               ("POSITION_FIELD", "Position", "vec3_t"), ("CURRENT_FIELD", "CurrentAction", "BYTE"),
@@ -184,13 +195,13 @@ def harness(revision=None):
         record = record.replace(token, re.search(rf"struct {name}\s*\{{.*?\}};", types, re.S).group())
     prefix = re.sub(r"struct OBJECT\s*\{.*?\};", lambda _: record, prefix, count=1, flags=re.S)
     header, globals_source = (read_source(path, revision) for path in ("src/globals.h", "src/globals.cpp"))
-    declarations = "\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;", read_source("src/Item/ItemDefines.h", revision), re.M))
-    for name in ("DAT_05828d58", "DAT_055c9e44", "DAT_07d78068"):
-        declarations += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
+    declarations = "\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;", read_source("src/game/item/ItemDefines.h", revision), re.M))
+    for name in ("Models", "DAT_055c9e44", "DAT_07d78068"):
+        declarations += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
         declarations += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", globals_source, re.M).group()
     declarations += re.search(r"static __forceinline [^\n]*\bItemAttribute_Base\([^\{]*\{.*?^\}", header, re.M | re.S).group()
-    terrain = function(read_source("src/Terrain/Terrain_Utils.cpp", revision), "Terrain_GetTileIndex").replace("Terrain_GetTileIndex(", "TileIndexReal(", 1)
-    stop = function(read_source("src/Entity/Character_Motion.cpp", revision), "SetPlayerStop").replace("rand()", "NextRandom()")
+    terrain = function(read_source("src/game/terrain/Terrain_Utils.cpp", revision), "Terrain_GetTileIndex").replace("Terrain_GetTileIndex(", "TileIndexReal(", 1)
+    stop = function(read_source("src/game/entity/Character_Motion.cpp", revision), "SetPlayerStop").replace("rand()", "NextRandom()")
     arg = "character" if "CHARACTER* c" in stop else "static_cast<int>(reinterpret_cast<std::uintptr_t>(character))"
     return prefix + declarations + terrain + SERVICES + stop + MAIN.replace("CALL_STOP", f"SetPlayerStop({arg})")
 

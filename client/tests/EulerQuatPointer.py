@@ -12,6 +12,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 #include <cmath>
 std::uint32_t seed;
@@ -58,8 +64,8 @@ int main() {
 
 def harness(revision=None):
     prefix = PREAMBLE.split("BYTE* reservation;", 1)[0] + "\n#include <cmath>\n"
-    prefix += re.search(r"^float\s+_DAT_00552ce0\s*=[^;]+;", read_source("src/globals.cpp", revision), re.M).group()
-    euler = function(read_source("src/Render/Render_LegacyTransforms.cpp", revision), "EulerToQuat")
+    prefix += optional_definition(re.search(r"^float\s+_DAT_00552ce0\s*=[^;]+;", read_source("src/globals.cpp", revision), re.M))
+    euler = function(read_source("src/render/Render_LegacyTransforms.cpp", revision), "EulerToQuat")
     args = "input, output" if "const float* param_1" in euler else "static_cast<int>(reinterpret_cast<std::uintptr_t>(input)), static_cast<int>(reinterpret_cast<std::uintptr_t>(output))"
     return prefix + euler + MAIN.replace("CALL_EULER", f"EulerToQuat({args}, 123, -456)")
 

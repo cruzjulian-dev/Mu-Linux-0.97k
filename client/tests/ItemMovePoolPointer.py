@@ -13,6 +13,12 @@ import tempfile
 from ItemConvertPointer import harness as convert_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 #include <type_traits>
 BYTE* pools[5];
@@ -23,6 +29,7 @@ BYTE* pools[5];
 #define Inventory (*reinterpret_cast<BYTE(*)[4352]>(pools[4]))
 #define dword_7EA9800 DAT_07ea9800
 alignas(ITEM) char DAT_07e91350[68];
+#define pPickedItem DAT_07e91350
 bool s_bPacketAfterEquipmentItem;
 BYTE s_byPacketAfterEquipmentItem[4];
 bool mergeAck;
@@ -143,17 +150,17 @@ def harness(revision=None):
     prefix=convert_harness(revision).split("void __cdecl ItemConvert(",1)[0]
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
     for name in ("DAT_07ea9800","g_ItemMoveSourcePool","g_ItemMoveTargetPool","DAT_07ea5b18"):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-        prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
-    move=read_source("src/Item/Item_Move.cpp",revision)
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+        prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
+    move=read_source("src/game/item/Item_Move.cpp",revision)
     prefix+=re.search(r"^int g_ItemMoveTargetDurBefore[^;]+;",move,re.M).group()+SERVICES
-    for namespace,path in (("FromMove","src/Item/Item_Move.cpp"),("FromDisplay","src/Item/Item_Display.cpp")):
+    for namespace,path in (("FromMove","src/game/item/Item_Move.cpp"),("FromDisplay","src/ui/inventory/Item_Display.cpp")):
         prefix+="\nnamespace "+namespace+" {"+function(read_source(path,revision),"InventoryMove_SetPendingPools")+"}\n"
-    click=read_source("src/Item/Item_ClickHandler.cpp",revision)
+    click=read_source("src/ui/inventory/Item_ClickHandler.cpp",revision)
     setter=re.search(r"\bdword_7EA9800\s*=\s*[^;]*\binv_base[^;]*;",click).group()
     getter=re.search(r"BYTE\* srcPool\s*=\s*[^;]+;",function(click,"RestorePickedItemToSource")).group()
     prefix+="\nvoid SetContext(BYTE* inv_base) {"+setter+"}\nBYTE* ReadContext() {"+getter+" return srcPool; }\n"
-    recv=read_source("src/Net/Recv/Recv_Item.cpp",revision)
+    recv=read_source("src/net/Recv/Recv_Item.cpp",revision)
     clear=function(recv,"ItemMove_ClearPickedState")
     assignments=[re.search(rf"\b{name}\s*=\s*0\s*;",clear).group() for name in ("DAT_07ea9800","g_ItemMoveSourcePool","g_ItemMoveTargetPool")]
     prefix+="\nvoid ItemMove_ClearPickedState() { Add(3,{});"+"".join(assignments)+"}\n"

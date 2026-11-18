@@ -27,11 +27,11 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);const
 '''
 
 def harness(revision=None):
-    source=read_source('src/Scene/Scene_LegacyHelpers.cpp',revision)
+    source=read_source('src/scenes/Scene_LegacyHelpers.cpp',revision)
     body=function(source,'VTable_Release')
     args='obj,vertices' if 'float* vertices' in body else 'obj,(int)vertices'
     wrapper='\nvoid Draw(void* obj,float* vertices){VTable_Release('+args+');}\n'
-    edge=function(read_source('src/Terrain/Terrain.cpp',revision),'FUN_0040a8f0')
+    edge=function(read_source('src/game/terrain/Terrain.cpp',revision),'MoltSilhouette_DrawEdgeRandom')
     return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x400000')+SERVICES+edge+body+wrapper+MAIN
 
 def main():

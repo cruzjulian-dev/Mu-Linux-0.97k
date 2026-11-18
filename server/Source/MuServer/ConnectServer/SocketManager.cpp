@@ -3,6 +3,7 @@
 #include "ClientManager.h"
 #include "ConnectServerProtocol.h"
 #include "IpManager.h"
+#include "SecureLink.h"
 #include "Util.h"
 
 CSocketManager gSocketManager;
@@ -308,7 +309,7 @@ bool CSocketManager::DataRecv(int index, IO_MAIN_BUFFER* lpIoBuffer)
 			return false;
 		}
 
-		if (size < 3 || size > MAX_MAIN_PACKET_SIZE)
+		if (size < 3 || size > MAX_PACKET_SIZE)
 		{
 			CClientManager* lpClientManager = &gClientManager[index];
 
@@ -363,6 +364,50 @@ bool CSocketManager::DataSend(int index, BYTE* lpMsg, int size)
 {
 	ConsoleProtocolLog(CON_PROTO_TCP_SEND, lpMsg, size);
 
+	if (size > MAX_PACKET_SIZE)
+	{
+		LogAdd(LOG_RED, "[SocketManager] Max msg size (Type: 1, Index: %d, Size: %d)", index, size);
+
+		return false;
+	}
+
+	this->m_critical.lock();
+
+	if (gSecureLink.IsSecure(index) == false)
+	{
+		const bool result = this->SendBytes(index, lpMsg, size);
+
+		this->m_critical.unlock();
+
+		return result;
+	}
+
+	// Va en un registro del canal cifrado.  Antes del saludo no hay claves: no
+	// se manda nada en claro.
+	static BYTE sealed[MAX_PACKET_SIZE + SecureChannel::Overhead];
+
+	const int sealedSize = gSecureLink.Seal(index, lpMsg, size, sealed);
+
+	const bool result = sealedSize != 0 && this->SendBytes(index, sealed, sealedSize);
+
+	this->m_critical.unlock();
+
+	return result;
+}
+
+bool CSocketManager::DataSendRaw(int index, const BYTE* data, int size)
+{
+	this->m_critical.lock();
+
+	const bool result = this->SendBytes(index, data, size);
+
+	this->m_critical.unlock();
+
+	return result;
+}
+
+bool CSocketManager::SendBytes(int index, const BYTE* lpMsg, int size)
+{
 	this->m_critical.lock();
 
 	if (CLIENT_RANGE(index) == 0)
@@ -503,9 +548,24 @@ void CSocketManager::OnRecv(int index, DWORD IoSize, IO_RECV_CONTEXT* lpIoContex
 
 	CClientManager* lpClientManager = &gClientManager[index];
 
-	lpIoContext->IoMainBuffer.size += IoSize;
+	bool ok;
 
-	if (this->DataRecv(index, &lpIoContext->IoMainBuffer) == false)
+	if (gSecureLink.IsSecure(index))
+	{
+		// Con canal cifrado el buffer de recepción sólo lleva bytes crudos:
+		// SecureLink deja el texto claro en el buffer de la conexión.
+		ok = gSecureLink.Receive(index, lpIoContext->IoMainBuffer.buff, (int)IoSize);
+
+		lpIoContext->IoMainBuffer.size = 0;
+	}
+	else
+	{
+		lpIoContext->IoMainBuffer.size += IoSize;
+
+		ok = this->DataRecv(index, &lpIoContext->IoMainBuffer);
+	}
+
+	if (ok == false)
 	{
 		this->Disconnect(index);
 

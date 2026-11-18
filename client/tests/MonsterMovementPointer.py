@@ -13,6 +13,12 @@ import tempfile
 from CharacterPositionPointer import harness as position_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 CHARACTER* movingCharacter;
 std::vector<int> moveEvents;
@@ -51,7 +57,7 @@ std::uint64_t RunMonster(CHARACTER* character, OBJECT* object, char* alias) {
         object->Type = Pick(types);
         for(int i = 0; i < 3; ++i) object->Position[i] = float(int(Input() % 1024) - 512);
         const int heroMode = trial % 3;
-        DAT_07abf5d8 = heroMode == 0 ? nullptr : heroMode == 1 ? reinterpret_cast<char*>(character) : alias;
+        Hero = heroMode == 0 ? nullptr : heroMode == 1 ? reinterpret_cast<char*>(character) : alias;
         advanceResult = Pick(results); routeResult = Pick(results);
         CHARACTER expected; OBJECT expectedObject;
         std::memcpy(&expected, character, sizeof(expected)); std::memcpy(&expectedObject, object, sizeof(expectedObject));
@@ -66,7 +72,7 @@ std::uint64_t RunMonster(CHARACTER* character, OBJECT* object, char* alias) {
                 expectedEvents = {1, 2}; expected.Run = 42; expected.PathCurrent = 17;
                 if(advanceResult & 255) {
                     expected.Movement = 0; expected.Run = 0; expectedEvents.push_back(3);
-                    expected.Object.Angle[2] = (float(reinterpret_cast<BYTE*>(&expected)[764]) - _DAT_0055256c) * _DAT_00552844;
+                    expected.Object.Angle[2] = (float(reinterpret_cast<BYTE*>(&expected)[764]) - _DAT_0055256c) * 45.0f;
                 }
                 expectedEvents.push_back(4); expected.Object.Position[2] += 1.0f;
             } else if(!reinterpret_cast<BYTE*>(&expected)[848] && object->Type != 277 &&
@@ -109,8 +115,8 @@ def harness(revision=None):
     prefix = prefix.replace("SetPlayerStop(", "UnusedStop(").replace("MoveCharacterPosition(", "UnusedPosition(")
     globals_source = read_source("src/globals.cpp", revision)
     for name in ("_DAT_0055256c", "_DAT_00552844"):
-        prefix += re.search(rf"^float\s+{name}\s*=[^;]+;", globals_source, re.M).group() + "\n"
-    monster = function(read_source("src/Entity/Character_Motion.cpp", revision), "MoveMonsterClient")
+        prefix += optional_definition(re.search(rf"^float\s+{name}\s*=[^;]+;", globals_source, re.M)) + "\n"
+    monster = function(read_source("src/game/entity/Character_Motion.cpp", revision), "MoveMonsterClient")
     args = "character, object" if "CHARACTER* character" in monster else "static_cast<int>(reinterpret_cast<std::uintptr_t>(character)), static_cast<int>(reinterpret_cast<std::uintptr_t>(object))"
     return prefix + SERVICES + monster + MAIN.replace("CALL_MONSTER", f"MoveMonsterClient({args})")
 

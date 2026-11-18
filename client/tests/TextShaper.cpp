@@ -2,9 +2,9 @@
 // bitmap y mismo avance para todo Windows-1252, en los tamaños y pesos que usa
 // el cliente. Si MU_TEST_FALLBACK_FONTS apunta a una carpeta con fuentes Noto,
 // además verifica respaldo, bidi y shaping de escrituras complejas.
-#include "Text/TextCore.h"
-#include "Text/TextShaper.h"
-#include "Platform/SDL3/SDLFont.h"
+#include "render/text/TextCore.h"
+#include "render/text/TextShaper.h"
+#include "platform/SDL3/SDLFont.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>

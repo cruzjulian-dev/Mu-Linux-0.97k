@@ -14,6 +14,12 @@ import tempfile
 
 from SceneObjectPointer import ROOT, build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 PREAMBLE = r'''
 #include <cstddef>
 #include <cstdint>
@@ -105,17 +111,17 @@ def harness(revision=None):
         'static_assert(sizeof(GATE_ATTRIBUTE) == 9);\n'
         'static_assert(offsetof(GATE_ATTRIBUTE, Target) == 6);\n'
         'static_assert(offsetof(GATE_ATTRIBUTE, RequireLevel) == 8);\n')
-    declaration = re.search(r"extern [^;\n]*\bGateAttribute\s*;",
-                            read_source("src/globals.h", revision)).group()
+    declaration = optional_definition(re.search(r"extern [^;\n]*\bGateAttribute\s*;",
+                            read_source("src/globals.h", revision)))
     definition = re.search(r"^[^/\n]*\bGateAttribute\s*=\s*[^;]+;",
                            read_source("src/globals.cpp", revision), re.M).group()
     allocation = re.search(r"^[ \t]*GateAttribute\s*=\s*[^;]+;",
-                           read_source("src/Platform/ClientEntry.cpp", revision), re.M).group()
+                           read_source("src/platform/ClientEntry.cpp", revision), re.M).group()
     allocation = allocation.replace("malloc(900)", "AllocateTable(900)")
     initialize = "void InitializeTable() { " + allocation + " }\n"
-    gate = read_source("src/Item/Gate_Data.cpp", revision)
-    cipher = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "BuxConvert_0")
-    sample = ROOT / "bin/Client/Data/Gate.bmd"
+    gate = read_source("src/assets/data/Gate_Data.cpp", revision)
+    cipher = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "BuxConvert_0")
+    sample = __import__("data_paths").asset(ROOT, "Gate.bmd")
     if not sample.is_file():
         raise FileNotFoundError(sample)
     return (PREAMBLE + record + asserts + declaration + definition + initialize + cipher

@@ -3,15 +3,15 @@
 import argparse
 from pathlib import Path
 import tempfile
-from SceneObjectPointer import build_and_run,function,read_source
+from SceneObjectPointer import build_and_run,function,read_source,object_creation_module
 from ObjectLayoutContract import object_types
 
 def variants(source):
     return source.split('// login/char-select scene type overrides',1)[1].split('\n',1)[1].split('\n}\n// IDA: DeleteBug',1)[0]
 
 def harness(args):
-    source=read_source('src/Scene/Scene_EntityLifecycle.cpp',args.current_ref)
-    reference=variants(read_source('src/Scene/Scene_EntityLifecycle.cpp',args.reference_ref)) if args.reference_ref else read_source('tests/fixtures/object-scene-variants-x86.inc')
+    source=read_source('src/scenes/Scene_EntityLifecycle.cpp',args.current_ref)
+    reference=variants(read_source('src/scenes/Scene_EntityLifecycle.cpp',args.reference_ref)) if args.reference_ref else read_source('tests/fixtures/object-scene-variants-x86.inc')
     helper=function(source,'SceneObject_StoreFloatBits') if 'void SceneObject_StoreFloatBits(' in source else ''
     prefix=r'''
 #include <cstddef>
@@ -33,7 +33,7 @@ void Require(bool ok){if(!ok){std::fputs("Variante OBJECT o registro incorrecto\
 void Translate(const BYTE* legacy,BYTE* native){
  for(unsigned i=0;i<444;++i)if(!(i>=252&&i<256)&&!(i>=276&&i<280)&&!(i>=388&&i<392)&&i<436)native[Offset(i)]=legacy[i];
 }
-'''+helper
+'''+helper+object_creation_module(args.current_ref)
     functions='\nvoid* Current(UINT* puVar3,int param_1){OBJECT& object=*reinterpret_cast<OBJECT*>(puVar3);'+variants(source)+'}\nvoid* Reference(UINT* puVar3,int param_1){'+reference+'}\n'
     main=r'''
 int main(){

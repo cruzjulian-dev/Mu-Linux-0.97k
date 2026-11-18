@@ -11,6 +11,58 @@ foreach(service ConnectServer JoinServer DataServer GameServer)
 endforeach()
 mu_link_mysql(JoinServer DataServer)
 
+# Código idéntico en varios servers (Fase 5, E5). Cada server lo compila con su
+# propio stdafx.h, igual que cuando tenía la copia en su carpeta.
+foreach(service ConnectServer JoinServer DataServer GameServer)
+  # Log, Queue: lo propio de cada server va en su LogTypes.h y su Queue.h.
+  target_sources(${service} PRIVATE Common/CriticalSection.cpp Common/Log.cpp
+    Common/MiniDump.cpp Common/Queue.cpp Common/ReadScript.cpp
+    Common/Console.cpp Common/UtilCommon.cpp)
+endforeach()
+
+# Ventana de estado y log de protocolo de los tres servers simples; lo propio
+# de cada uno está en su ServerDisplayerServer.cpp. El GameServer tiene los suyos.
+foreach(service ConnectServer JoinServer DataServer)
+  target_sources(${service} PRIVATE Common/ServerDisplayer.cpp Common/UtilProtocolLog.cpp)
+endforeach()
+
+# Límite de conexiones por IP; el máximo sale del IpManagerServer.h de cada uno.
+target_sources(ConnectServer PRIVATE Common/IpManager.cpp)
+target_sources(GameServer PRIVATE Common/IpManager.cpp)
+
+# Índice de los GameServer conectados (gServerManager).
+target_sources(JoinServer PRIVATE Common/ServerIndex.cpp)
+target_sources(DataServer PRIVATE Common/ServerIndex.cpp)
+target_sources(JoinServer PRIVATE Common/QueryManager.cpp Common/AllowableIpList.cpp)
+target_sources(DataServer PRIVATE Common/QueryManager.cpp Common/AllowableIpList.cpp)
+
+# SocketManager de los dos servers que atienden a los GameServer. Lo propio de
+# cada uno (tope del buffer y quién atiende los paquetes) va en su
+# SocketManagerServer.h. ConnectServer y GameServer tienen el suyo en su carpeta.
+if(WIN32)
+  set(mu_socket_manager Common/SocketManager.cpp)
+else()
+  set(mu_socket_manager Common/SocketManagerLinux.cpp)
+endif()
+target_sources(JoinServer PRIVATE ${mu_socket_manager} Common/ServerManager.cpp)
+target_sources(DataServer PRIVATE ${mu_socket_manager} Common/ServerManager.cpp)
+
+# Enlace UDP con el ConnectServer (el ConnectServer recibe; los otros dos envían).
+# A dónde van los errores y quién atiende lo recibido sale del
+# SocketManagerUdpServer.h de cada uno.
+if(WIN32)
+  set(mu_socket_manager_udp Common/SocketManagerUdp.cpp)
+else()
+  set(mu_socket_manager_udp Common/SocketManagerUdpLinux.cpp)
+endif()
+foreach(service ConnectServer JoinServer GameServer)
+  target_sources(${service} PRIVATE ${mu_socket_manager_udp})
+endforeach()
+
+# Texto de las consultas con los valores escapados (Common/SqlFormat).
+target_sources(JoinServer PRIVATE Common/SqlFormat.cpp)
+target_sources(DataServer PRIVATE Common/SqlFormat.cpp)
+
 # Contraseñas de cuenta con bcrypt (Common/PasswordHash, crypt_blowfish en C).
 target_sources(JoinServer PRIVATE Common/PasswordHash.cpp Common/crypt_blowfish/crypt_blowfish.c)
 if(WIN32)
@@ -32,11 +84,22 @@ endfunction()
 mu_add_text_library(MuText "")
 mu_add_text_library(MuTextDLL "DLL")
 target_link_libraries(GameServer PRIVATE MuText)
+
+# Firmas y cifrado (Fase 5, C3/C4): Monocypher, en C y sin el stdafx.h.  El
+# ConnectServer usa el mismo canal y la misma clave de identidad que el
+# GameServer (la genera el GameServer; el ConnectServer sólo la lee).
+foreach(service ConnectServer GameServer)
+  target_sources(${service} PRIVATE Common/monocypher/monocypher.c Common/SecureChannel.cpp Common/ServerIdentity.cpp)
+  if(WIN32)
+    target_link_libraries(${service} PRIVATE bcrypt)
+  endif()
+endforeach()
 target_link_libraries(DataServer PRIVATE MuTextDLL)
 
-# Datos por carpeta de mapa (Fase 5): spawns en TOML. Lo usan el GameServer y
-# la herramienta mu-data (importar desde MonsterSetBase.txt y comparar).
-add_library(MuData STATIC Common/MapSpawns.cpp)
+# Datos por carpeta de mapa y por evento (Fase 5): spawns e invasiones en TOML.
+# Lo usan el GameServer y la herramienta mu-data (importar desde los .txt/.dat
+# y comparar).
+add_library(MuData STATIC Common/MapSpawns.cpp Common/EventInvasions.cpp Common/MapInfo.cpp Common/ItemDrops.cpp Common/MapGates.cpp Common/MapZones.cpp Common/ItemExtras.cpp)
 target_include_directories(MuData PUBLIC Common)
 target_compile_features(MuData PUBLIC cxx_std_17)
 if(MSVC)

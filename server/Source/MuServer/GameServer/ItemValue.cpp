@@ -17,6 +17,29 @@ CItemValue::~CItemValue()
 
 }
 
+void CItemValue::SetInfo(const std::vector<ItemExtraDef>& items)
+{
+	this->m_ItemValueInfo.clear();
+
+	for (const ItemExtraDef& d : items)
+	{
+		for (const ItemExtraValue& v : d.Value)
+		{
+			ITEM_VALUE_INFO info;
+
+			info.Index = SafeGetItem(GET_ITEM(d.Section, d.Index));
+
+			info.Level = v.Level;
+
+			info.BuyValue = v.Buy;
+
+			info.SellValue = v.Sell;
+
+			this->m_ItemValueInfo.push_back(info);
+		}
+	}
+}
+
 void CItemValue::Load(const char* path)
 {
 	CReadScript* lpReadScript = new CReadScript;
@@ -133,44 +156,4 @@ bool CItemValue::GetItemSellValue(CItem* lpItem, ULONGLONG* value)
 	}
 
 	return false;
-}
-
-void CItemValue::GCItemValueListSend(int aIndex)
-{
-	BYTE send[2048];
-
-	PMSG_ITEM_VALUE_LIST_SEND pMsg;
-
-	pMsg.header.set(0xF3, 0xE4, 0);
-
-	int size = sizeof(pMsg);
-
-	pMsg.count = 0;
-
-	ITEM_VALUE_INFO info;
-
-	for (std::vector<ITEM_VALUE_INFO>::iterator it = this->m_ItemValueInfo.begin(); it != this->m_ItemValueInfo.end(); it++)
-	{
-		info.Index = it->Index;
-
-		info.Level = it->Level;
-
-		info.BuyValue = it->BuyValue;
-
-		info.SellValue = it->SellValue;
-
-		memcpy(&send[size], &info, sizeof(info));
-
-		size += sizeof(info);
-
-		pMsg.count++;
-	}
-
-	pMsg.header.size[0] = SET_NUMBERHB(size);
-
-	pMsg.header.size[1] = SET_NUMBERLB(size);
-
-	memcpy(send, &pMsg, sizeof(pMsg));
-
-	DataSend(aIndex, send, size);
 }

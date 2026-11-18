@@ -6,12 +6,12 @@ The eggs in [`../Pterodactyl eggs`](../Pterodactyl%20eggs) use Pterodactyl's exp
 
 Every release using these eggs includes:
 
-- `Pterodactyl-eggs-0.97.40.zip`
+- `Pterodactyl-eggs-<version>.zip`
 - `mu-linux-97k-server-amd64.tar.gz`
 - `mu-linux-97k-server-arm64.tar.gz`
 - `mu-linux-97k-web.tar.gz`
 - `SHA256SUMS.txt`
 
-Run `./pterodactyl/package-release-assets.sh` on a Linux Docker host after publishing the server image. It creates the architecture-specific runtime archives, web archive and egg ZIP.
+The `Release` workflow (`.github/workflows/release.yml`) builds and attaches them when a GitHub Release is published. To build them by hand, run `VERSION=<version> ./pterodactyl/package-release-assets.sh` on a Linux Docker host after publishing the server image. It creates the architecture-specific runtime archives, web archive and egg ZIP.
 
 `start.sh` handles `SIGINT` and `SIGTERM`, forwarding them to ConnectServer, JoinServer, DataServer and GameServer. The egg's `^C` stop command therefore shuts services down cleanly.

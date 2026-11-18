@@ -27,6 +27,9 @@ public:
 
 	bool CheckGameMasterLevel(LPOBJ lpObj, int level);
 
+	// Nivel más alto que tiene el personaje en la lista (0 si no está).
+	int GetGameMasterLevel(LPOBJ lpObj);
+
 private:
 
 	GAME_MASTER_INFO m_GameMasterInfo[MAX_GAME_MASTER];

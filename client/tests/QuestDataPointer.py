@@ -18,7 +18,7 @@ SERVICES = r'''
 using uint=unsigned int;
 using byte=unsigned char;
 char DAT_005580ac[]="rb";
-const char s__s___File_not_exist__00558094[]="archivo inexistente";
+const char s__s___File_not_exist__00558094[]="%s - File not exist.";
 BYTE* scratch;
 BYTE* quest;
 bool failOpen=false, closed=false;
@@ -88,9 +88,9 @@ def harness(revision=None):
     definitions = read_source("src/globals.cpp", revision)
     prefix += re.search(r"^char\s+bBuxCode\[3\]\s*=\s*[^;]+;", definitions, re.M).group()
     prefix += SERVICES
-    prefix += function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "BuxConvert_1")
-    body = function(read_source("src/Item/Quest_Data.cpp", revision), "CSQuest_OpenQuestScript")
-    sample = ROOT / "bin/Client/Data/Local/quest.bmd"
+    prefix += function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "BuxConvert_1")
+    body = function(read_source("src/assets/data/Quest_Data.cpp", revision), "CSQuest_OpenQuestScript")
+    sample = __import__("data_paths").asset(ROOT, "Local/quest.bmd")
     if not sample.is_file():
         raise FileNotFoundError(sample)
     arg = "destination" if "BYTE* handle" in body else "static_cast<int>(reinterpret_cast<std::uintptr_t>(destination))"

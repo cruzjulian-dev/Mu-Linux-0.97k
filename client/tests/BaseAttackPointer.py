@@ -16,13 +16,19 @@ import tempfile
 from BaseDefensePointer import harness as defense_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 int CallBase(BYTE* machine) { return CALL_BASE; }
 std::uint64_t RunBase(BYTE* machine, BYTE* attribute, BYTE* allocation, int displacement) {
     seed = 0x97c47d41; std::uint64_t digest = 14695981039346656037ull;
     const auto reservation = reinterpret_cast<std::uintptr_t>(allocation);
     const auto base = reservation + displacement * 64;
-    DAT_055c9e44 = reservation; DAT_07d78068 = base; DAT_07cf1ff4 = attribute;
+    DAT_055c9e44 = reservation; DAT_07d78068 = base; CharacterAttribute = attribute;
     std::memset(allocation, 0xa5, (ITEM_MAX_EX + 1024) * 64);
     std::vector<BYTE> expectedTable(allocation, allocation + (ITEM_MAX_EX + 1024) * 64);
     const short types[] = {-32768, -1, 0, 31, 127, 128, 134, 135, 136, 142, 143, 144, 145, 159, 160, 192, 193, 8191, 8192, 32767};
@@ -55,8 +61,8 @@ std::uint64_t RunBase(BYTE* machine, BYTE* attribute, BYTE* allocation, int disp
         }
         DAT_055c9e44 = trial % 13 == 0 ? 0 : reservation;
         DAT_07d78068 = trial % 17 == 0 ? reservation + 1 : base;
-        DAT_07cf1ff4 = trial % 19 == 0 ? nullptr : attribute;
-        const bool valid = DAT_055c9e44 && DAT_07d78068 == base && DAT_07cf1ff4;
+        CharacterAttribute = trial % 19 == 0 ? nullptr : attribute;
+        const bool valid = DAT_055c9e44 && DAT_07d78068 == base && CharacterAttribute;
         BYTE before[1412], beforeAttribute[64]; std::memcpy(before, machine, 1412); std::memcpy(beforeAttribute, attribute, 64);
         const int returned = CallBase(machine);
         if(!valid) Require(returned == 0 && std::memcmp(before, machine, 1412) == 0);
@@ -104,11 +110,11 @@ def harness(revision=None):
     prefix += "\n#ifndef _WIN32\n#define __fastcall\n#define __forceinline inline\n#endif\n"
     header, globals_source = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
     name = "DAT_055c9e44"
-    prefix += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
+    prefix += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
     prefix += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", globals_source, re.M).group()
-    prefix += "\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;", read_source("src/Item/ItemDefines.h", revision), re.M))
+    prefix += "\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;", read_source("src/game/item/ItemDefines.h", revision), re.M))
     prefix += re.search(r"static __forceinline [^\n]*\bItemAttribute_Base\([^\{]*\{.*?^\}", header, re.M | re.S).group()
-    base = function(read_source("src/Core/Runtime_Small.cpp", revision), "Stats_CalcBase")
+    base = function(read_source("src/app/core/Runtime_Small.cpp", revision), "Stats_CalcBase")
     arg = "machine" if "BYTE* a1" in base else "static_cast<int>(reinterpret_cast<std::uintptr_t>(machine))"
     return prefix + base + MAIN.replace("CALL_BASE", f"Stats_CalcBase({arg})")
 

@@ -8,6 +8,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 #include <cmath>
 #include <initializer_list>
@@ -106,14 +112,14 @@ int main(){
 
 
 def harness(revision=None):
-    source=read_source('src/Physics/Cloth_Simulation.cpp',revision)
+    source=read_source('src/game/physics/Cloth_Simulation.cpp',revision)
     names=['Vec3_Length','SpringNode_Delta','Cloth_SpringRange','Cloth_SpringEqual','ClothNode_ApplyForces','VerletSystem_Flush','SpringNode_ZeroFields','SpringNode_SetPos','SpringNode_GetPos','VerletNode_AddAccel','ClothNode_Integrate','ClothNode_AddCorrection']
     code='\n'.join(function(source,name) for name in names)
     header,definitions=read_source('src/globals.h',revision),read_source('src/globals.cpp',revision)
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES
     for name in sorted(set(re.findall(r'\b_?DAT_[0-9a-f]+',code))):
-        prefix+=re.search(rf'extern [^;\n]*\b{name}\s*;',header).group()
-        prefix+=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M).group()
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}\s*;',header))
+        prefix+=optional_definition(re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M))
     current='uintptr_t b' in function(source,'SpringNode_Delta')
     arg='reinterpret_cast<uintptr_t>(PTR)' if current else 'static_cast<int>(reinterpret_cast<uintptr_t>(PTR))'
     main=MAIN.replace('A_ARG',arg.replace('PTR','a')).replace('B_ARG',arg.replace('PTR','b'))

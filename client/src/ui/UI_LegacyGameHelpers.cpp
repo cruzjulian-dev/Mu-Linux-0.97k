@@ -1,0 +1,125 @@
+#include <cstdint>
+// UI_LegacyGameHelpers.cpp
+
+#include "stdafx.h"
+void __fastcall FUN_0045aaa0_impl(void *_this, char flags);
+void __cdecl    ClothNode_ScalarDtor(void *_this, char flags);
+#include "globals.h"
+#include "functions.h"
+
+// -- Declaraciones de funciones definidas en otros modulos ------------------
+// Cloth_Integrate esta en Physics/Cloth_Simulation.cpp y Cloth_Solve en
+// Net/Crypto.cpp.
+void __fastcall Cloth_Integrate(int*, float);
+int  __cdecl    Cloth_Solve(DWORD *a1);
+
+#include "net/Net.h"
+
+extern "C" BYTE OffsetInventoryItems[];
+extern void __cdecl operator_delete(void* ptr);
+extern void MapFileDecrypt(BYTE* buf, int size);
+
+// UI/game helpers
+// Item_ReturnPickedItem @ 0x004CD3B0 — UI_ItemGrid_Fill
+// Fills 2D grid buffers with current item slot data (pPickedItem) for equipment display.
+// Dispatches by DAT_07ea9800; each grid entry = 0x11 dwords, selection flag at offset 0x38.
+//
+// IDA sub_4CD3B0:
+//   pos = Inventory[32].Type (= DAT_07ea5b18, slot de origen)
+//   pool de origen (dword_7EA9800): trade / baul / mix -> celda = pos
+//                                   inventario        -> celda = pos - 12
+//                                   pos < 12          -> slot de equipo
+//   cada celda del footprint = pPickedItem, Key = 1 solo en la primaria
+//   (byte_7E9138E/F = columna/fila de la primaria)
+//   al final: dword_7E91388 = 0; SetCharacterClass(Hero); PlayBuffer(29)
+// IDA: sub_4CD3B0 (0x004CD3B0)
+void __cdecl Item_ReturnPickedItem(void)
+{
+    if ((int)pPickedItemKey < 1) return;
+
+    const int type = (int)*(short*)pPickedItem;           // (std::int16_t)pPickedItem
+    const BYTE* attr = (const BYTE*)(uintptr_t)DAT_07d78068 + type * 0x40;
+    const int w = attr[0x20];
+    const int h = attr[0x21];
+    const int selCol = (int)(BYTE)DAT_07e9138e;
+    const int selRow = (int)(BYTE)DAT_07e9138f;
+    const int pos    = (int)DAT_07ea5b18;
+    BYTE* const src  = DAT_07ea9800;
+
+    auto fill = [&](BYTE* pool, int cell0) {
+        const int col0 = cell0 % 8, row0 = cell0 / 8;
+        for (int row = row0; row < row0 + h; ++row)
+            for (int col = col0; col < col0 + w; ++col) {
+                BYTE* cell = pool + (col + row * 8) * 0x44;
+                memcpy(cell, pPickedItem, 0x44);
+                *(int*)(cell + 0x38) = (row == selRow && col == selCol) ? 1 : 0;
+            }
+    };
+
+    if (src == &OffsetTradeItems[0])          fill(OffsetTradeItems, pos);
+    else if (src == &OffsetWarehouseItems[0]) fill(OffsetWarehouseItems, pos);
+    else if (src == &OffsetMixItems[0])       fill(OffsetMixItems, pos);
+    else if (pos >= 12)                       fill(OffsetInventoryItems, pos - 12);
+    else if (pos >= 0 && CharacterMachine) {
+        if (pos == 8 && Hero) {
+            int bug = (type == 416) ? 816 : (type == 418) ? 195 : (type == 419) ? 267 : 0;
+            if (bug)
+                CreateBug(bug, (void*)(Hero + 0x10), (void*)Hero, 0);
+        }
+        memcpy((BYTE*)CharacterMachine + 68 * pos + 536, pPickedItem, 0x44);
+    }
+
+    pPickedItemKey = 0;
+    if (Hero) SetCharacterClass(AsCharacter(Hero));      // SetCharacterClass(Hero)
+    PlayBuffer(29, 0, 0);                                  // PlayBuffer(29)
+    // (bloques de hash-table anti-tamper omitidos)
+}
+
+// SelectSkillByHotkey @ 0x004B0E80 — SelectSkillByHotkey(int number)
+//
+// Elige la skill activa a partir del numero de hotkey que el jugador acaba de
+// apretar.  Recorre las 20 ranuras de skill y, para la que tenga asignado ese
+// numero, escribe su indice en `Hero + 913` (la skill en uso).
+//
+//   for (i = 0; i < 20; i++) {
+//       if (CharacterAttribute[i + 87] &&
+//           CharacterAttribute[(SelectedHero << 6) + i + 215] == a1) {
+//           Hero[913] = i;  found = 1;
+//       }
+//       if (m_bAutoAttack && World != 6) {
+//           v9 = CharacterAttribute[Hero[913] + 87];
+//           if (v9 == 6 || v9 == 15) { SelectedCharacter = -1; Attacking = -1; }
+//       }
+//   }
+//
+// El numero llega como argumento (Ghidra lo pierde: viaja en registro).
+// Globals (verificados con ida_get_function):
+// SelectedHero = 0x5616AC, m_bAutoAttack = 0x559C5C, Attacking = 0x559C58,
+// CharacterAttribute = 0x7CF1FF4;  +87 = tipo de skill, +215 = numero de hotkey
+// (la tabla es por personaje: SelectedHero << 6).
+// IDA: sub_4B0E80 (0x004B0E80)
+char __cdecl SelectSkillByHotkey(int a1)
+{
+    char found = 0;
+    char* CA = (char*)CharacterAttribute;
+    char* playerEnt = (char*)Hero;
+    if (!CA || !playerEnt) return 0;
+
+    const int hero = (int)SelectedHero;   // SelectedHero
+    for (int i = 0; i < 20; i++) {
+        if (CA[i + 87] != 0 &&
+            (unsigned char)CA[(hero << 6) + i + 215] == (unsigned char)a1) {
+            FieldAs(playerEnt, AsCharacter(playerEnt)->CurrentSkill) = (char)i;
+            found = 1;
+        }
+        if (m_bAutoAttack != 0 && gMapManager.Current().autoAttack) {
+            const char skillType = CA[AsCharacter(playerEnt)->CurrentSkill + 87];
+            if (skillType == 6 || skillType == 15) {
+                SelectedCharacter = 0xffffffff;
+                Attacking      = 0xffffffff;   // Attacking = -1
+            }
+        }
+    }
+    return found;
+}
+

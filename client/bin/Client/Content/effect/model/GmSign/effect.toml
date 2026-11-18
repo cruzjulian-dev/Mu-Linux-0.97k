@@ -1,0 +1,4 @@
+# Signo sobre la cabeza de los GM (nivel 1 de GameMaster.txt).  Lo carga
+# render/GmSign.cpp.
+source = "Skill/GmSign"
+model = "musign.bmd"

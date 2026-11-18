@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Selección real de servidores: tabla nativa, bordes, paquetes y estado x86."""
 import argparse
+import re
 import os
 from pathlib import Path
 import tempfile
 from GatePointer import PREAMBLE
-from SceneObjectPointer import build_and_run, function, read_source
+from SceneObjectPointer import build_and_run, function, read_source, dialog_messages
 
 SERVICES=r'''
 #include <algorithm>
@@ -15,21 +16,25 @@ char* table;
 #define DAT_083a45ed (*(table+21))
 #define DAT_083a4604 (*reinterpret_cast<DWORD*>(table+44))
 #define DAT_083a4606 (*reinterpret_cast<unsigned short*>(table+46))
+STRUCTS
+#define ServerList (*reinterpret_cast<SERVER_LIST_t(*)[MAX_SERVER_HI]>(table))
 struct State{DWORD hi,lo,local,click,x,y,cooldown,c24,c28,tick,reset,code;int login;};State state;
 #define ServerSelectHi state.hi
 #define ServerSelectLo state.lo
 #define ServerLocalSelect state.local
-#define DAT_083a4124 state.click
-#define DAT_083a427c state.x
-#define DAT_083a4278 state.y
+#define MouseLButtonPush state.click
+#define MouseX state.x
+#define MouseY state.y
 #define DAT_083a7c44 state.cooldown
-#define DAT_083a7c24 state.c24
-#define DAT_083a7c28 state.c28
+#define ErrorMessage state.c24
+#define NextErrorMessage state.c28
 #define DAT_083a7ac8 state.tick
 #define DAT_083a4320 state.reset
 #define DAT_083a4328 state.code
-#define DAT_083a7c14 state.login
-int DAT_055c9bf0;char DAT_083a7c64[64];DWORD DAT_083a7c68;char GlobalText[1000][300];const char* PTR_s_connect_muonline_co_kr_005615b8="fixture";unsigned short g_ServerPort=55901;bool connectMode;unsigned trial;std::vector<DWORD> events;
+#define LoginSubState state.login
+int DAT_055c9bf0;char DAT_083a7c64[64];DWORD DAT_083a7c68;char GlobalText[1000][300];
+#define szServerIpAddress PTR_s_connect_muonline_co_kr_005615b8
+const char* PTR_s_connect_muonline_co_kr_005615b8="fixture";unsigned short g_ServerPort=55901;bool connectMode;unsigned trial;std::vector<DWORD> events;
 void CErrorReport_Write(int* context,const char* message){Require(context==&DAT_055c9bf0);if(std::strcmp(message,"> Server group selected")==0)events.push_back(1);else{Require(std::strcmp(message,"> Server selected")==0);events.push_back(4);}}
 struct Network{void SendToConnectServer(const BYTE* packet,int n){Require(n==4 || n==6);events.push_back(2);events.push_back(n);for(int i=0;i<n;++i)events.push_back(packet[i]);}bool IsConnectServerMode(){events.push_back(6);return connectMode;}}gNetwork;
 void PlayBuffer(int id,int a,int b){Require(id==0x19 && !a && !b);events.push_back(3);}
@@ -51,8 +56,18 @@ std::uint64_t Run(BYTE* memory){table=reinterpret_cast<char*>(memory+16);std::ui
 int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);const auto expected=Run(low);if(sizeof(void*)>4){auto* high=static_cast<BYTE*>(Reserve(std::uint64_t(0x126000000ull)));auto* bit31=static_cast<BYTE*>(Reserve(0x7fff0000u));auto* wrap=static_cast<BYTE*>(Reserve(std::uint64_t(0xffff0000ull)));Require(high && bit31 && wrap);BYTE* addresses[]={high,bit31+0xe000,wrap+0xe000};for(auto* address:addresses){std::memset(low,0x7b,13856);Require(Run(address)==expected);for(unsigned i=0;i<13856;++i)Require(low[i]==0x7b);}std::puts("tabla alta y cruces bit31/4GiB; paquetes/estado/aliases iguales");}std::printf("Server input: 8192 consultas por ruta %016llx\n",static_cast<unsigned long long>(expected));}
 '''
 
+def server_structs(revision=None):
+    structs=read_source('src/structs.h',revision)
+    out='using WORD=std::uint16_t;\n'
+    for name in ('MAX_SERVER_HI','MAX_SERVER_LO'):
+        out+=re.search(rf'^#define {name}[^\n]+',structs,re.M).group()+'\n'
+    for name in ('SERVER_t','SERVER_LIST_t'):
+        out+=re.search(rf'^struct {name}\s*\{{.*?^\}};',structs,re.M|re.S).group()+'\n'
+    return out
+
+
 def harness(revision=None):
-    return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x20000')+SERVICES+function(read_source('src/Scene/Scene_ServerSelect_Input.cpp',revision),'CServerSelWin_UpdateWhileActive')+MAIN
+    return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x20000')+dialog_messages(revision)+SERVICES.replace('STRUCTS',server_structs(revision))+function(read_source('src/scenes/Scene_ServerSelect_Input.cpp',revision),'CServerSelWin_UpdateWhileActive')+MAIN
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--architecture',choices=('Win32','x64'),default='x64');parser.add_argument('--generator');parser.add_argument('--reference-ref');args=parser.parse_args()

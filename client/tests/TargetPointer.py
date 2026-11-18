@@ -14,6 +14,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SUPPORT = r'''
 using vec3_t = float[3];
 struct CHARACTER {
@@ -26,7 +32,8 @@ static_assert(sizeof(void*) != 4 || (offsetof(CHARACTER, TargetPosition) == 788)
 CHARACTER* AsCharacter(CHARACTER* p) { return p; }
 CHARACTER* AsCharacter(std::uintptr_t p) { return reinterpret_cast<CHARACTER*>(p); }
 int SelectedCharacter;
-DWORD TargetX, TargetY, DAT_080ab288, DAT_080ab28c;
+DWORD TargetX, TargetY, SelectXF, DAT_080ab28c;
+#define SelectYF DAT_080ab28c
 float DAT_083a4130, DAT_083a4134, DAT_083a4138;
 bool terrainHit;
 int terrainCalls, tileCalls;
@@ -34,8 +41,8 @@ float Float(DWORD bits) { float f; std::memcpy(&f, &bits, 4); return f; }
 DWORD Bits(float f) { DWORD bits; std::memcpy(&bits, &f, 4); return bits; }
 void RenderTerrain(char mode) { Require(mode == 1); ++terrainCalls; }
 int RenderTerrainTile(int x, int y, int gx, int gy, float size, int a, int b) {
-    Require(DWORD(x) == DAT_080ab288 && DWORD(y) == DAT_080ab28c);
-    Require(gx == int(Float(DAT_080ab288)) && gy == int(Float(DAT_080ab28c)));
+    Require(DWORD(x) == SelectXF && DWORD(y) == DAT_080ab28c);
+    Require(gx == int(Float(SelectXF)) && gy == int(Float(DAT_080ab28c)));
     Require(size == 1.0f && a == 1 && b == 1); ++tileCalls; return terrainHit;
 }
 std::uint64_t digest;
@@ -61,7 +68,7 @@ std::uint64_t Run(BYTE* pool, CHARACTER* character) {
         SelectedCharacter = test < 400 ? test : -1;
         terrainHit = (test % 2) != 0;
         terrainCalls = tileCalls = 0;
-        DAT_080ab288 = Bits(-12.75f); DAT_080ab28c = Bits(234.5f);
+        SelectXF = Bits(-12.75f); DAT_080ab28c = Bits(234.5f);
         DAT_083a4130 = (test - 405) * 99.75f;
         DAT_083a4134 = (test - 402) * -150.25f; DAT_083a4138 = 345.125f;
         TargetX = 0x12345678; TargetY = 0x98765432;
@@ -104,11 +111,12 @@ int main() {
 def harness(revision=None):
     header = read_source("src/globals.h", revision)
     globals_source = read_source("src/globals.cpp", revision)
-    declaration = re.search(r"extern [^;\n]*\bCharactersClient\s*;", header).group()
+    declaration = optional_definition(re.search(r"extern [^;\n]*\bCharactersClient\s*;", header))
     definition = re.search(r"^[^/\n]*\bCharactersClient\s*=\s*[^;]+;", globals_source, re.M).group()
-    alias = re.search(r"^#define DAT_07abf5d0[^\n]+", read_source("src/structs.h", revision), re.M).group()
-    field = re.search(r"vec3_t\s+TargetPosition\s*;", read_source("src/Entity/EntityTypes.h", revision)).group()
-    target = function(read_source("src/Combat/Combat_Targeting.cpp", revision), "CheckTarget")
+    # El alias CharactersClient -> CharactersClient existe sólo en revisiones viejas.
+    alias = (lambda m: m.group() if m else "")(re.search(r"^#define DAT_07abf5d0[^\n]+", read_source("src/structs.h", revision), re.M))
+    field = re.search(r"vec3_t\s+TargetPosition\s*;", read_source("src/game/entity/EntityTypes.h", revision)).group()
+    target = function(read_source("src/game/combat/Combat_Targeting.cpp", revision), "CheckTarget")
     call = "CheckTarget(character)" if "CHARACTER* c" in target else "CheckTarget(static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(character)))"
     return (PREAMBLE.split("BYTE* reservation;")[0].replace("0x10000", "0x100000")
             + declaration + definition + "\n" + alias + "\n"

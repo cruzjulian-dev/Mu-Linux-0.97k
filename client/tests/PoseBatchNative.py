@@ -10,12 +10,18 @@ from AnimationBonesPointer import harness as animation_harness
 from ObjectLayoutContract import object_types,record
 from SceneObjectPointer import ROOT,read_source,function,build_and_run
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 #include <array>
 #include <unordered_map>
 #include <algorithm>
 using vec34_t=float[3][4];
-uintptr_t DAT_05828d58,DAT_07abf5d0,DAT_07abf5d8;int SceneFlag,DAT_07e11d30,DAT_005597c4;DWORD MoveSceneFrame;
+uintptr_t Models,CharactersClient,Hero;int SceneFlag,EditFlag,DAT_005597c4;DWORD MoveSceneFrame;
 OBJECT* AsObject(void* p){return static_cast<OBJECT*>(p);}OBJECT* AsObject(uintptr_t p){return reinterpret_cast<OBJECT*>(p);}
 BMD* AsModel(uintptr_t p){return reinterpret_cast<BMD*>(p);}
 const BMD* AsModel(const void* p){return static_cast<const BMD*>(p);}
@@ -51,11 +57,11 @@ std::array<float,200*12> Consume(unsigned slot,bool hit){
  Require(std::memcmp(&expected,m,sizeof(BMD))==0&&std::memcmp(direct.data(),cached.data(),sizeof(direct))==0&&std::memcmp(expectedQ,globalQuats,sizeof(expectedQ))==0&&std::memcmp(expectedP,globalParent,sizeof(expectedP))==0);Hash(cached.data(),sizeof(cached));Hash(globalQuats,sizeof(globalQuats));Hash(globalParent,sizeof(globalParent));Hash(m->BodyAngle,12);Hash(&m->CurrentAnimation,6);Hash(&m->CurrentAction,1);Require(std::memcmp(o,&ownerBefore,sizeof(OBJECT))==0);++poseChecks;return cached;
 }
 int main(){
- DAT_07abf5d0=reinterpret_cast<uintptr_t>(characters);DAT_05828d58=reinterpret_cast<uintptr_t>(models);DAT_07abf5d8=reinterpret_cast<uintptr_t>(characters);quaternionGlobal=globalQuats;parentGlobal=globalParent;
- if(sizeof(void*)==8)Require(DAT_07abf5d0>0xffffffffull&&DAT_05828d58>0xffffffffull&&reinterpret_cast<uintptr_t>(descriptors)>0xffffffffull&&reinterpret_cast<uintptr_t>(actions)>0xffffffffull&&reinterpret_cast<uintptr_t>(keys)>0xffffffffull&&reinterpret_cast<uintptr_t>(vertices)>0xffffffffull&&reinterpret_cast<uintptr_t>(normals)>0xffffffffull);
+ CharactersClient=reinterpret_cast<uintptr_t>(characters);Models=reinterpret_cast<uintptr_t>(models);Hero=reinterpret_cast<uintptr_t>(characters);quaternionGlobal=globalQuats;parentGlobal=globalParent;
+ if(sizeof(void*)==8)Require(CharactersClient>0xffffffffull&&Models>0xffffffffull&&reinterpret_cast<uintptr_t>(descriptors)>0xffffffffull&&reinterpret_cast<uintptr_t>(actions)>0xffffffffull&&reinterpret_cast<uintptr_t>(keys)>0xffffffffull&&reinterpret_cast<uintptr_t>(vertices)>0xffffffffull&&reinterpret_cast<uintptr_t>(normals)>0xffffffffull);
  for(unsigned trial=0;trial<32;++trial){
   ObjectPose_EndBatch();std::memset(characters,0,sizeof(characters));std::memset(models,0,sizeof(models));std::memset(descriptors,0,sizeof(descriptors));std::memset(actions,0,sizeof(actions));std::memset(meshes,0,sizeof(meshes));
-  SceneFlag=5;DAT_07e11d30=0;DAT_005597c4=int(trial%2);TransformWorkers::available=2;TransformWorkers::reverse=trial%2;
+  SceneFlag=5;EditFlag=0;DAT_005597c4=int(trial%2);TransformWorkers::available=2;TransformWorkers::reverse=trial%2;
   for(unsigned m=0;m<2;++m){
    models[m].NumBones=3;models[m].NumActions=2;models[m].NumMeshs=1;models[m].Bones=reinterpret_cast<BYTE*>(descriptors[m]);models[m].Actions=reinterpret_cast<BYTE*>(actions[m]);models[m].Meshs=reinterpret_cast<BYTE*>(meshes+m);models[m].BoneHead=-1;models[m].ShadowAngle[2]=float(trial%3)*15;
    meshes[m].VertexCount=4096;meshes[m].NormalCount=4;meshes[m].Vertices=reinterpret_cast<BYTE*>(vertices[m]);meshes[m].Normals=normals[m];
@@ -71,7 +77,7 @@ int main(){
   if(mode==4){characters[3].Object.Live=0;active=false;}
   if(mode==5){meshes[0].VertexCount=1;meshes[1].VertexCount=1;active=false;}
   if(mode==6){characters[3].Object.Alpha=0;active=false;}
-  if(mode==7){DAT_07e11d30=2;active=false;}
+  if(mode==7){EditFlag=2;active=false;}
   if(mode==8){SceneFlag=2;active=false;}
   if(mode==9){models[0].NumBones=0;models[1].NumBones=0;active=false;}
   if(mode==10){characters[3].Object.Visible=0;active=false;}
@@ -86,9 +92,9 @@ int main(){
   if(!active)continue;
   for(unsigned slot=0;slot<4;++slot){auto output=Consume(slot,true);auto& o=characters[slot].Object;auto& m=models[o.Type];auto& mesh=meshes[o.Type];m.LightEnable=o.LightEnable;
    if(!prepared[slot].geometry){float dummy[3]{};Require(!ObjectPose_RestoreGeometry(&m,output.data(),1,1,dummy,dummy,dummy,dummy,dummy));++missChecks;continue;}
-   float direction[3]={0,0,0},coefficients[3]={_DAT_00552530,_DAT_005528b4,_DAT_005526e4};if(m.LightEnable){float in[3]={0,-1.5f,0},rot[12];if(DAT_005597c4){in[0]=1.3f;in[1]=0;in[2]=2;}Matrix_BuildFromEuler(m.ShadowAngle,rot);Vector_InverseRotate(in,rot,direction);}
+   float direction[3]={0,0,0},coefficients[3]={0.8f,0.4f,0.2f};if(m.LightEnable){float in[3]={0,-1.5f,0},rot[12];if(DAT_005597c4){in[0]=1.3f;in[1]=0;in[2]=2;}Matrix_BuildFromEuler(m.ShadowAngle,rot);Vector_InverseRotate(in,rot,direction);}
    std::vector<float> pos(45000,91),norm(45000,92),light(15000,93),expectedPos=pos,expectedNorm=norm,expectedLight=light;
-   TransformMath::Mesh source{reinterpret_cast<const BYTE*>(vertices[o.Type]),reinterpret_cast<const BYTE*>(normals[o.Type]),expectedPos.data(),expectedNorm.data(),expectedLight.data(),4096,4};TransformMath::Batch reference{&source,1,output.data(),1,m.BodyScale,{m.BodyOrigin[0],m.BodyOrigin[1],m.BodyOrigin[2]},{direction[0],direction[1],direction[2]},{coefficients[0],coefficients[1],coefficients[2]},1.f==_DAT_0055256c,true,m.LightEnable!=0};TransformMath::Run(&reference,0,4100);
+   TransformMath::Mesh source{reinterpret_cast<const BYTE*>(vertices[o.Type]),reinterpret_cast<const BYTE*>(normals[o.Type]),expectedPos.data(),expectedNorm.data(),expectedLight.data(),4096,4};TransformMath::Batch reference{&source,1,output.data(),1,m.BodyScale,{m.BodyOrigin[0],m.BodyOrigin[1],m.BodyOrigin[2]},{direction[0],direction[1],direction[2]},{coefficients[0],coefficients[1],coefficients[2]},1.f==1.0f,true,m.LightEnable!=0};TransformMath::Run(&reference,0,4100);
    Require(ObjectPose_RestoreGeometry(&m,output.data(),1,1,direction,coefficients,pos.data(),norm.data(),light.data()));Require(pos==expectedPos&&norm==expectedNorm&&light==expectedLight);Hash(pos.data(),pos.size()*sizeof(float));Hash(norm.data(),norm.size()*sizeof(float));Hash(light.data(),light.size()*sizeof(float));++geometryChecks;
    for(unsigned invalid=0;invalid<(sizeof(void*)==8?13u:12u);++invalid){auto oldM=m;auto oldMesh=mesh;auto oldVertex=vertices[o.Type][0];auto oldNormal=normals[o.Type][0];auto oldBone=output[0];float d[3];std::memcpy(d,direction,12);float c[3];std::memcpy(c,coefficients,12);char translate=1;float scale=1;
     if(invalid==0)translate=0;if(invalid==1)scale=2;if(invalid==2)d[0]+=1;if(invalid==3)c[1]+=.5f;if(invalid==4)output[0]+=1;if(invalid==5)vertices[o.Type][0].p[0]+=.5f;if(invalid==6)normals[o.Type][0].p[0]+=.5f;if(invalid==7)mesh.Vertices+=16;if(invalid==8)--mesh.VertexCount;if(invalid==9)m.Meshs=reinterpret_cast<BYTE*>(meshes+(1-o.Type));if(invalid==10)m.BodyScale+=1;if(invalid==11)m.LightEnable^=1;if(invalid==12)m.Meshs=reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(m.Meshs)^std::uint64_t(0x100000000ull));
@@ -105,12 +111,12 @@ int main(){
 
 def harness(revision=None):
  prefix=animation_harness();prefix=prefix[:re.search(r'(?:static )?void AnimateWithScratch\(',prefix).start()]
- prefix+='\nusing vec34_t=float[3][4];\n'+object_types()+'\n#pragma pack(push,1)\n'+record(read_source('src/Physics/ClothTypes.h'),'ClothModelMesh')+'\n#pragma pack(pop)\nstatic_assert(sizeof(ClothModelMesh)==(sizeof(void*)==4?40:60));\n'
- prefix+='\n#include "'+(ROOT/'src/Render/TransformMath.h').as_posix()+'"\n'
- source=read_source('src/Entity/ObjectPose.cpp',revision);source=re.sub(r'^#include[^\n]*\n','',source,flags=re.M)
+ prefix+='\nusing vec34_t=float[3][4];\n'+object_types()+'\n#pragma pack(push,1)\n'+record(read_source('src/game/physics/ClothTypes.h'),'ClothModelMesh')+'\n#pragma pack(pop)\nstatic_assert(sizeof(ClothModelMesh)==(sizeof(void*)==4?40:60));\n'
+ prefix+='\n#include "'+(ROOT/'src/render/TransformMath.h').as_posix()+'"\n'
+ source=read_source('src/game/entity/ObjectPose.cpp',revision);source=re.sub(r'^#include[^\n]*\n','',source,flags=re.M)
  existing=set(re.findall(r'\bfloat\s+(\w+)\s*=',prefix,re.M));names=set(re.findall(r'\b_DAT_[0-9a-f]+\b',source));globals=read_source('src/globals.cpp')
- constants='\n'.join(re.search(r'^float\s+'+n+r'\s*=\s*[^;]+;',globals,re.M).group()for n in sorted(names-existing))
- return prefix+SERVICES+constants+function(read_source('src/Math/Math_3D.cpp'),'Vector_InverseRotate')+function(read_source('src/Entity/ObjectBounds.h'),'ObjectBounds_Build')+source+MAIN
+ constants='\n'.join(optional_definition(re.search(r'^float\s+'+n+r'\s*=\s*[^;]+;',globals,re.M))for n in sorted(names-existing))
+ return prefix+SERVICES+constants+function(read_source('src/game/math/Math_3D.cpp'),'Vector_InverseRotate')+function(read_source('src/game/entity/ObjectBounds.h'),'ObjectBounds_Build')+source+MAIN
 
 def main():
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--architecture',choices=('Win32','x64'),default='x64');p.add_argument('--generator');p.add_argument('--reference-ref');a=p.parse_args()

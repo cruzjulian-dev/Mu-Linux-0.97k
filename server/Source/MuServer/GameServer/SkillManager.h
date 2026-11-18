@@ -47,6 +47,11 @@ enum eSkillNumber
 	SKILL_SUMMON5 = 34,
 	SKILL_SUMMON6 = 35,
 	SKILL_SUMMON7 = 36,
+	// Mu-Linux: orbe de invocación +7..+10 (las skills 37..40 estaban libres).
+	SKILL_SUMMON8 = 37,
+	SKILL_SUMMON9 = 38,
+	SKILL_SUMMON10 = 39,
+	SKILL_SUMMON11 = 40,
 	SKILL_TWISTING_SLASH = 41,
 	SKILL_RAGEFUL_BLOW = 42,
 	SKILL_DEATH_STAB = 43,
@@ -191,6 +196,16 @@ struct SKILL_INFO
 	int RequireClass[MAX_CLASS];
 };
 
+// Skills que resuelven sus blancos dentro del 0x1E (Triple Shot con el cono
+// del angulo; Twisting Slash, Rageful Blow y Death Stab con el radio).  El
+// 0x1D que manda el cliente por cada impacto de esos skills sobra: el server
+// lo descarta (CGMultiSkillAttackRecv) y tampoco lo cuenta para el limite de
+// paquetes por segundo (CHackPacketCheck::CheckPacketRate).
+inline bool SkillResolvesTargetsInDurationAttack(int skill)
+{
+	return skill == SKILL_TRIPLE_SHOT || skill == SKILL_TWISTING_SLASH || skill == SKILL_RAGEFUL_BLOW || skill == SKILL_DEATH_STAB;
+}
+
 class CSkillManager
 {
 public:
@@ -202,6 +217,8 @@ public:
 	void Load(const char* path);
 
 	bool GetInfo(int index, SKILL_INFO* lpInfo);
+
+	const std::map<int, SKILL_INFO>& GetAll() const { return this->m_SkillInfo; }
 
 	int GetSkillDamage(int index);
 

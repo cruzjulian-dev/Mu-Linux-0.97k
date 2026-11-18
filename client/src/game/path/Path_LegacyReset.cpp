@@ -1,0 +1,39 @@
+// Path_LegacyReset.cpp
+
+#include "stdafx.h"
+#include "game/core/PathContext.h"
+void __fastcall FUN_0045aaa0_impl(void *_this, char flags);
+void __cdecl    ClothNode_ScalarDtor(void *_this, char flags);
+#include "globals.h"
+#include "functions.h"
+
+// Definidas en Physics/Cloth_Simulation.cpp (Cloth_Integrate) y Net/Crypto.cpp (Cloth_Solve).
+void __fastcall Cloth_Integrate(int*, float);
+int  __cdecl    Cloth_Solve(DWORD *a1);
+
+#include "net/Net.h"
+
+extern "C" BYTE OffsetInventoryItems[];
+extern void __cdecl operator_delete(void* ptr);
+extern void MapFileDecrypt(BYTE* buf, int size);
+
+// IDA: FUN_0043f2d0 @ 0x0043F2D0 — Pathfinder_Reset: frees + re-initialises A* context at DAT_05826df4.
+// Despite the "Font_Reset" comment in functions.h, this is clearly the A* grid init.
+void __cdecl PathFinder_ResetContext(void) {
+    PathContext *ctx = DAT_05826df4;
+    if (ctx->Flags   != nullptr) { operator_delete(ctx->Flags);   ctx->Flags = nullptr; }
+    if (ctx->Cost    != nullptr) { operator_delete(ctx->Cost);    ctx->Cost = nullptr; }
+    if (ctx->ParentX != nullptr) { operator_delete(ctx->ParentX); ctx->ParentX = nullptr; }
+    if (ctx->ParentY != nullptr) { operator_delete(ctx->ParentY); ctx->ParentY = nullptr; }
+    ctx->DirtyMin = 1950000000;
+    ctx->DirtyMax = -1;
+    ctx->Width    = 0x100;
+    ctx->Height   = 0x100;
+    ctx->Walk     = TerrainWall;
+    ctx->Size     = 0x10000;
+    ctx->Flags    = static_cast<unsigned char *>(operator_new(0x10000));
+    ctx->Cost     = static_cast<int *>(operator_new(ctx->Size * sizeof(int)));
+    ctx->ParentX  = static_cast<int *>(operator_new(ctx->Size * sizeof(int)));
+    ctx->ParentY  = static_cast<int *>(operator_new(ctx->Size * sizeof(int)));
+    memset(ctx->Flags, 0, ctx->Size);
+}

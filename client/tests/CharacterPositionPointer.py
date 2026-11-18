@@ -13,6 +13,12 @@ import tempfile
 from CharacterMoveSpeedPointer import harness as speed_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 int heightCalls, fabsCalls;
 float heightX, heightY;
@@ -52,13 +58,13 @@ std::uint64_t RunPosition(CHARACTER* character) {
         const float x = expected.Object.Position[0], y = expected.Object.Position[1];
         float height = x * 0.125f + y * 0.25f - 17.0f;
         // Gate del port: no introducir aquí la corrección World/SafeZone de IDA.
-        if(expected.Helper.Type == 819) height += gMapManager.world == 8 || gMapManager.world == 10 ? _DAT_00552848 : _DAT_0055284c;
+        if(expected.Helper.Type == 819) height += gMapManager.world == 8 || gMapManager.world == 10 ? 90.0f : 30.0f;
         expected.Object.Position[2] = height;
         if(expected.Object.Type == 272) {
             const float bob = float(sin(expected.Object.Timer));
             expected.Object.Position[2] = expected.Object.Position[2] - bob * 70.0f + 70.0f;
         }
-        expected.Object.Timer = expected.Object.Timer + _DAT_00552934;
+        expected.Object.Timer = expected.Object.Timer + 0.15f;
         heightCalls = fabsCalls = 0; CallPosition(character);
         Require(heightCalls == 1 && fabsCalls == int(expected.Object.Type == 272));
         Require(heightX == x && heightY == y);
@@ -83,15 +89,15 @@ int main() {
 
 def harness(revision=None):
     prefix = speed_harness(revision).split("float10 CallSpeed(CHARACTER* character)", 1)[0]
-    types = read_source("src/Entity/EntityTypes.h", revision)
+    types = read_source("src/game/entity/EntityTypes.h", revision)
     angle = re.search(r"vec3_t\s+Angle\s*;", types).group()
-    timer = re.search(r"float\s+Timer\s*;", types).group()
+    timer = optional_definition(re.search(r"float\s+Timer\s*;", types))
     prefix = prefix.replace("BYTE beforeKind[132 - 28];", angle + " BYTE beforeTimer[128 - 40]; " + timer, 1)
     prefix += "\nstatic_assert(sizeof(void*) != 4 || (offsetof(OBJECT, Angle) == 28 && offsetof(OBJECT, Timer) == 128));\n"
     globals_source = read_source("src/globals.cpp", revision)
     for name in ("_DAT_00552848", "_DAT_0055284c", "_DAT_00552934"):
-        prefix += re.search(rf"^float\s+{name}\s*=[^;]+;", globals_source, re.M).group() + "\n"
-    position = function(read_source("src/Entity/Character_Motion.cpp", revision), "MoveCharacterPosition")
+        prefix += optional_definition(re.search(rf"^float\s+{name}\s*=[^;]+;", globals_source, re.M)) + "\n"
+    position = function(read_source("src/game/entity/Character_Motion.cpp", revision), "MoveCharacterPosition")
     arg = "character" if "CHARACTER* character" in position else "static_cast<int>(reinterpret_cast<std::uintptr_t>(character))"
     return prefix + SERVICES + position + MAIN.replace("CALL_POSITION", f"MoveCharacterPosition({arg})")
 

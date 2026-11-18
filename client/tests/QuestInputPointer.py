@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 #ifndef _WIN32
 #define __fastcall
@@ -44,7 +50,7 @@ MAIN = r'''
 template<class T> void Put(BYTE* p,T value) { std::memcpy(p,&value,sizeof(value)); }
 std::uint64_t RunInput(BYTE* memory,BYTE* attributes,BYTE* machine) {
     constexpr std::size_t size=0x1c890+32;
-    BYTE* quest=memory+16; activeQuest=quest; DAT_07cf1ff4=attributes; DAT_07cf1ffc=machine;
+    BYTE* quest=memory+16; activeQuest=quest; CharacterAttribute=attributes; CharacterMachine=machine;
     std::uint64_t digest=14695981039346656037ull; coverage=0;
     const int margins[]={-120,0,107,320}, scripts[]={-1,0,199,200}, slotTypes[]={-1,0,1,2,3,2147483647}, links[]={-1,0,1,199,200,2147483647};
     const int xEdges[]={-1,0,24,25,34,35,106,144,155,189,190,212,300}, yEdges[]={-1,0,249,250,354,355,378,379,394,395,418,419,432,433}, rowEdges[]={-1,0,17,18};
@@ -63,14 +69,14 @@ std::uint64_t RunInput(BYTE* memory,BYTE* attributes,BYTE* machine) {
         const short textIds[]={-32768,-1,0,1,199,200,32767}; Put(record+340,textIds[next()%7]);
         Put(attributes+14,levels[next()%3]); Put(machine+0x548,amounts[next()%6]);
         margin=margins[trial%4]; g_iCurrentDialogScript=scripts[next()%4];
-        DAT_083a7c0c=next()%11; DAT_083a4324=next()%8;
+        DAT_083a7c0c=next()%11; g_iNumLineMessageBoxCustom=next()%8;
         const int origin=450+margin;
-        const int yBase=quest[0x1c882]!=1 && quest[0x1c87f]==1?250:((7-(static_cast<int>(DAT_083a7c0c)+static_cast<int>(DAT_083a4324)))*18)/2+66+static_cast<int>(DAT_083a4324)*18;
+        const int yBase=quest[0x1c882]!=1 && quest[0x1c87f]==1?250:((7-(static_cast<int>(DAT_083a7c0c)+static_cast<int>(g_iNumLineMessageBoxCustom)))*18)/2+66+static_cast<int>(g_iNumLineMessageBoxCustom)*18;
         const int x=origin+xEdges[next()%13];
         const int y=trial%2?yBase+(static_cast<int>(next()%13)-2)*18+rowEdges[next()%4]:yEdges[next()%14];
         MouseX=static_cast<DWORD>(x); MouseY=static_cast<DWORD>(y);
-        DAT_083a4124=trial%5==0?2:trial%3==0?0:1; DAT_083a42c4=next()%4;
-        DAT_07e11d28=next(); DAT_00559bec=next(); DAT_07d78094=next()%2; DAT_083a413c=next()%4;
+        MouseLButtonPush=trial%5==0?2:trial%3==0?0:1; MouseLButton=next()%4;
+        MouseUpdateTime=next(); MouseUpdateTimeMax=next(); DAT_07d78094=next()%2; MouseLButtonPop=next()%4;
         for(int script : {0,199}) {
             std::memset(&g_DialogScript[script],0,sizeof(DIALOG_SCRIPT));
             for(int slot=0;slot<10;++slot) {
@@ -83,7 +89,7 @@ std::uint64_t RunInput(BYTE* memory,BYTE* attributes,BYTE* machine) {
         std::memcpy(before,memory,size); std::memcpy(allowed,memory,size); std::memcpy(beforeAttributes,attributes,64); std::memcpy(beforeMachine,machine,1412);
         const BYTE oldState=quest[0x1c882]; const int oldScript=g_iCurrentDialogScript;
         events.clear(); const bool proceed=(trial/4)%2!=0;
-        if(proceed) Require(CSQuest_ProceedButton(quest)==1); else FUN_00401af0(quest);
+        if(proceed) Require(CSQuest_ProceedButton(quest)==1); else Quest_AnswerHitTest(quest);
         for(int offset : {0x1c87f,0x1c880,0x1c881,0x1c882,0x1c884,0x1c885,0x1c886,0x1c887}) allowed[16+offset]=quest[offset];
         Require(std::memcmp(allowed,memory,size)==0 && std::memcmp(beforeAttributes,attributes,64)==0 && std::memcmp(beforeMachine,machine,1412)==0);
         Require(std::memcmp(&beforeFirst,&g_DialogScript[0],sizeof(DIALOG_SCRIPT))==0 && std::memcmp(&beforeLast,&g_DialogScript[199],sizeof(DIALOG_SCRIPT))==0);
@@ -91,7 +97,7 @@ std::uint64_t RunInput(BYTE* memory,BYTE* attributes,BYTE* machine) {
         if(events.empty()) coverage|=16; if(oldState!=5 && quest[0x1c882]==5) coverage|=32; if(oldScript!=g_iCurrentDialogScript) coverage|=64;
         for(int event : events) { digest^=static_cast<unsigned>(event); digest*=1099511628211ull; }
         for(int offset=0x1c87a;offset<=0x1c887;++offset) { digest^=quest[offset]; digest*=1099511628211ull; }
-        const DWORD values[]={DAT_083a4124,DAT_083a42c4,DAT_07e11d28,DAT_00559bec,DAT_07d78094,DAT_083a413c,static_cast<DWORD>(g_iCurrentDialogScript),DAT_083a7c0c,DAT_083a4324};
+        const DWORD values[]={MouseLButtonPush,MouseLButton,MouseUpdateTime,MouseUpdateTimeMax,DAT_07d78094,MouseLButtonPop,static_cast<DWORD>(g_iCurrentDialogScript),DAT_083a7c0c,g_iNumLineMessageBoxCustom};
         for(DWORD value : values) { digest^=value; digest*=1099511628211ull; }
     }
     if(coverage!=127) std::fprintf(stderr,"cobertura de entrada: %u\n",coverage);
@@ -118,25 +124,37 @@ int main() {
 
 def harness(revision=None):
     prefix = PREAMBLE.split("char DAT_00559bb4", 1)[0].replace("0x10000", "0x100000")
-    prefix += read_source("src/UI/PanelAnchor.h", revision).replace("#pragma once", "")
+    prefix += read_source("src/ui/PanelAnchor.h", revision).replace("#pragma once", "")
     header, definitions = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
     prefix += "\n" + re.search(r"^#define DIALOG_SCRIPT_COUNT[^\n]+", header, re.M).group() + "\n"
     prefix += re.search(r"struct DIALOG_SCRIPT\s*\{.*?\n\};", header, re.S).group() + "\nstatic_assert(sizeof(DIALOG_SCRIPT)==0x400);\n"
-    names=("DAT_07cf1ff4","DAT_07cf1ffc","DAT_005615dc","DAT_083a7c0c","DAT_083a4324","DAT_083a4278","DAT_083a427c","DAT_083a4124","DAT_083a42c4","DAT_07e11d28","DAT_00559bec","DAT_07d78094","DAT_083a413c")
+    names=("CharacterAttribute","CharacterMachine","DAT_005615dc","DAT_083a7c0c","g_iNumLineMessageBoxCustom","MouseY","MouseX","MouseLButtonPush","MouseLButton","MouseUpdateTime","MouseUpdateTimeMax","DAT_07d78094","MouseLButtonPop")
     for name in names:
-        prefix += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
-        prefix += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M).group()
+        # DAT_07d78094 paso a llamarse MouseOnWindow (T8e); el arnes sigue
+        # usando el nombre viejo, asi que con el nuevo se agrega un alias.
+        if name == "DAT_07d78094" and not re.search(r"\bDAT_07d78094\s*;", header):
+            name = "MouseOnWindow"
+            prefix += "\n#define DAT_07d78094 MouseOnWindow\n"
+        # DAT_005615dc paso a ser g_iCurrentDialogScript (T8n).
+        if name == "DAT_005615dc" and not re.search(r"\bDAT_005615dc\s*;", header):
+            name = "g_iCurrentDialogScript"
+        if name == "DAT_083a7c0c" and not re.search(r"\bDAT_083a7c0c\s*;", header):
+            name = "g_iNumAnswer"
+            prefix += "\n#define DAT_083a7c0c g_iNumAnswer\n"
+        prefix += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
+        prefix += optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M))
     prefix += re.search(r"^DWORD\s+DAT_07cf5608\[[^;]+;", definitions, re.M).group()
     aliases=header+read_source("src/structs.h",revision)
-    for name in ("g_DialogScript","g_iCurrentDialogScript","MouseX","MouseY"):
-        prefix += "\n"+re.search(rf"^#define\s+{name}\s+[^\n]+",aliases,re.M).group()+"\n"
+    for name in ("g_DialogScript","g_iCurrentDialogScript"):
+        match = re.search(rf"^#define\s+{name}\s+[^\n]+",aliases,re.M)
+        if match: prefix += "\n"+match.group()+"\n"
     prefix += SERVICES + function(header,"IsClickPushed")
-    scene=read_source("src/Scene/Scene_CharSelect_Nav.cpp",revision)
+    scene=read_source("src/scenes/Scene_CharSelect_Nav.cpp",revision)
     prefix += function(scene,"CSQuest_CheckRequestCondition")
-    prefix += function(read_source("src/Item/Quest_UIState.cpp",revision),"CSQuest_clearQuest")
-    for name in ("Quest_SendState","FUN_00401af0"):
+    prefix += function(read_source("src/ui/Quest_UIState.cpp",revision),"CSQuest_clearQuest")
+    for name in ("Quest_SendState","Quest_AnswerHitTest"):
         prefix += function(scene,name)
-    prefix += function(read_source("src/Net/Crypto.cpp",revision),"CSQuest_ProceedButton")
+    prefix += function(read_source("src/net/Crypto.cpp",revision),"CSQuest_ProceedButton")
     return prefix+MAIN
 
 

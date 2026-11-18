@@ -15,9 +15,16 @@ const { parseGameMaster, buildStaffIndex, lookupStaff } = require('./lib/game-ma
 const translations = require('./lib/translations');
 const customItems = require('./lib/custom-items');
 const itemRows = require('./lib/item-rows');
+const itemExtras = require('./lib/item-extras');
 const noticeLimits = require('./lib/notices');
 const accountPassword = require('./lib/account-password');
 const spawns = require('./lib/spawns');
+const mapsLib = require('./lib/maps');
+const dropsLib = require('./lib/drops');
+const gatesLib = require('./lib/gates');
+const summonsLib = require('./lib/summons');
+const zonesLib = require('./lib/zones');
+const mapFoldersLib = require('./lib/map-folders');
 
 // Se pone en true cuando ensureSchema confirma que memb__pwd tiene 60 bytes.
 let passwordColumnWide = false;
@@ -1783,6 +1790,10 @@ app.get('/admin/server-editor/mapmanager', requireAdmin, requireAdminPasswordCha
   res.render('admin_mapmanager_editor');
 });
 
+app.get('/admin/server-editor/map-folders', requireAdmin, requireAdminPasswordChange, (req, res) => {
+  res.render('admin_map_folder_editor');
+});
+
 app.get('/admin/server-editor/gms', requireAdmin, requireAdminPasswordChange, (req, res) => {
   res.render('admin_gm_editor');
 });
@@ -1813,6 +1824,48 @@ app.get('/admin/server-editor/commands', requireAdmin, requireAdminPasswordChang
 
 app.get('/admin/server-editor/skills', requireAdmin, requireAdminPasswordChange, (req, res) => {
   res.render('admin_config_editor', { title: 'CFG skills', kind: 'skill', reload: 'skill' });
+});
+
+// Invocaciones de la elfa: monstruo de cada nivel del orbe y escalado
+// (GameServerInfo - Skill.dat, ver lib/summons.js).
+const SUMMON_SKILL_DAT = 'GameServer/Data/GameServerInfo - Skill.dat';
+
+app.get('/admin/server-editor/summons', requireAdmin, requireAdminPasswordChange, (req, res) => {
+  res.render('admin_summon_editor');
+});
+
+app.get('/admin/server-editor/api/summons', requireAdmin, requireAdminPasswordChange, async (req, res) => {
+  if (!editorEnabled) {
+    return res.status(503).json({ error: 'Editor disabled' });
+  }
+  try {
+    const [skill, monsters] = await Promise.all([
+      readEditorFile(SUMMON_SKILL_DAT),
+      readEditorFile('Data/Monster/Monster.txt')
+    ]);
+    return res.json({ ...summonsLib.parse(skill), monsters: summonsLib.parseMonsters(monsters) });
+  } catch (err) {
+    return res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+app.post('/admin/server-editor/api/summons', requireAdmin, requireAdminPasswordChange, async (req, res) => {
+  if (!editorEnabled) {
+    return res.status(503).json({ error: 'Editor disabled' });
+  }
+  try {
+    const [skill, monsters] = await Promise.all([
+      readEditorFile(SUMMON_SKILL_DAT),
+      readEditorFile('Data/Monster/Monster.txt')
+    ]);
+    const ids = new Set(summonsLib.parseMonsters(monsters).map((m) => m.id));
+    const state = summonsLib.validate(req.body, ids);
+    const data = await editorRequest('POST', '/api/file', { path: SUMMON_SKILL_DAT, content: summonsLib.apply(skill, state) });
+    return res.json({ ok: true, backups: data.backups || [] });
+  } catch (err) {
+    const status = err instanceof summonsLib.SummonError ? 400 : (err.status || 502);
+    return res.status(status).json({ error: err.message });
+  }
 });
 
 app.get('/admin/server-editor/events', requireAdmin, requireAdminPasswordChange, (req, res) => {
@@ -2050,8 +2103,7 @@ app.get('/admin/server-editor/api/map-defs', requireAdmin, requireAdminPasswordC
     return res.status(503).json({ error: 'Editor disabled' });
   }
   try {
-    const data = await editorRequest('GET', `/api/file?path=${encodeURIComponent('Data/MapManager.txt')}`);
-    const maps = parseMapManager(data.content || '');
+    const maps = parseMapManager((await readMapManager()).content);
     return res.json({ maps });
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message });
@@ -2113,9 +2165,274 @@ async function readEditorFile(rel) {
   return data.content || '';
 }
 
+// Reglas de los mapas: el GameServer usa los Data/Maps/NN-Nombre/Map.toml si hay
+// alguno y si no, MapManager.txt. El editor siempre recibe y manda el texto del
+// .txt; con los TOML el panel convierte en los dos sentidos.
+const MAP_MANAGER_TXT = 'Data/MapManager.txt';
+
+// Todas las carpetas de mapa por número (tengan lo que tengan) y los Map.toml
+// que hay, con el mismo criterio que el GameServer.
+async function findMapTomlFiles() {
+  const folders = new Map();
+  const files = [];
+  for (const entry of (await listEditorDir(spawns.MAPS_DIR)) || []) {
+    const map = spawns.folderMap(entry.name);
+    if (entry.type !== 'dir' || map < 0) continue;
+    const inside = (await listEditorDir(`${spawns.MAPS_DIR}/${entry.name}`)) || [];
+    if (inside.some((f) => f.type === 'file' && f.name === mapsLib.MAP_FILE)) {
+      if (files.some((f) => f.map === map)) {
+        throw new mapsLib.MapError(`Dos carpetas para el mapa ${map}: '${folders.get(map)}' y '${entry.name}'`);
+      }
+      files.push({ path: `${spawns.MAPS_DIR}/${entry.name}/${mapsLib.MAP_FILE}`, map });
+      folders.set(map, entry.name);
+    } else if (!folders.has(map)) {
+      folders.set(map, entry.name);
+    }
+  }
+  return { files, folders };
+}
+
+// { format: 'txt' | 'toml', content } con el texto de MapManager.txt.
+async function readMapManager() {
+  const { files } = await findMapTomlFiles();
+  if (!files.length) {
+    return { format: 'txt', content: await readEditorFile(MAP_MANAGER_TXT) };
+  }
+  const loaded = await Promise.all(files.map(async (f) => ({ ...f, content: await readEditorFile(f.path) })));
+  return { format: 'toml', files: files.map((f) => f.path), content: mapsLib.buildLegacy(mapsLib.parseToml(loaded)) };
+}
+
+// Escribe un Map.toml por mapa y borra el de los mapas que ya no están.
+async function writeMapToml(maps, files, folders) {
+  const out = mapsLib.buildToml(maps, { folders });
+  let backups = [];
+  for (const [path, content] of Object.entries(out)) {
+    const data = await editorRequest('POST', '/api/file', { path, content });
+    backups = backups.concat(data.backups || []);
+  }
+  for (const f of files) {
+    if (!out[f.path]) {
+      const data = await editorRequest('POST', '/api/delete', { path: f.path });
+      backups = backups.concat(data.backups || []);
+    }
+  }
+  return { files: Object.keys(out), backups };
+}
+
+function mapErrorStatus(err) {
+  return err instanceof mapsLib.MapError ? 400 : (err.status || 502);
+}
+
+// Drops especiales: el GameServer usa Data/Items/Drops.toml y los
+// Data/Maps/NN-Nombre/Drops.toml si hay alguno y si no, ItemDrop.txt. El editor
+// siempre recibe y manda el texto del .txt; con los TOML el panel convierte en
+// los dos sentidos.
+const ITEM_DROP_TXT = 'Data/Item/ItemDrop.txt';
+
+async function findDropTomlFiles() {
+  const folders = new Map();
+  const files = [];
+  const globalDir = dropsLib.GLOBAL_FILE.slice(0, dropsLib.GLOBAL_FILE.lastIndexOf('/'));
+  if (((await listEditorDir(globalDir)) || []).some((f) => f.type === 'file' && f.name === dropsLib.DROP_FILE)) {
+    files.push({ path: dropsLib.GLOBAL_FILE, map: -1 });
+  }
+  for (const entry of (await listEditorDir(spawns.MAPS_DIR)) || []) {
+    const map = spawns.folderMap(entry.name);
+    if (entry.type !== 'dir' || map < 0) continue;
+    const inside = (await listEditorDir(`${spawns.MAPS_DIR}/${entry.name}`)) || [];
+    if (inside.some((f) => f.type === 'file' && f.name === dropsLib.DROP_FILE)) {
+      if (files.some((f) => f.map === map)) {
+        throw new dropsLib.DropError(`Dos carpetas para el mapa ${map}: '${folders.get(map)}' y '${entry.name}'`);
+      }
+      files.push({ path: `${spawns.MAPS_DIR}/${entry.name}/${dropsLib.DROP_FILE}`, map });
+      folders.set(map, entry.name);
+    } else if (!folders.has(map)) {
+      folders.set(map, entry.name);
+    }
+  }
+  return { files, folders };
+}
+
+// Nombre de cada mapa (de los Map.toml o de MapManager.txt), para las carpetas
+// nuevas.
+async function mapNameLookup() {
+  const maps = parseMapManager((await readMapManager().catch(() => ({ content: '' }))).content);
+  const names = new Map(maps.map((m) => [m.id, m.name]));
+  return (id) => names.get(id);
+}
+
+// Escribe los Drops.toml y borra los que quedaron sin drops.
+async function writeDropToml(drops, files, folders) {
+  const out = dropsLib.buildToml(drops, { mapName: await mapNameLookup(), folders });
+  let backups = [];
+  for (const [path, content] of Object.entries(out)) {
+    const data = await editorRequest('POST', '/api/file', { path, content });
+    backups = backups.concat(data.backups || []);
+  }
+  for (const f of files) {
+    if (!out[f.path]) {
+      const data = await editorRequest('POST', '/api/delete', { path: f.path });
+      backups = backups.concat(data.backups || []);
+    }
+  }
+  return { files: Object.keys(out), backups };
+}
+
+function dropErrorStatus(err) {
+  return err instanceof dropsLib.DropError ? 400 : (err.status || 502);
+}
+
+// Gates: el GameServer usa los Data/Maps/NN-Nombre/Gates.toml si hay alguno y si
+// no, Gate.txt. El editor siempre recibe y manda el texto del .txt; con los TOML
+// el panel convierte en los dos sentidos.
+const GATE_TXT = 'Data/Move/Gate.txt';
+
+async function findGateTomlFiles() {
+  const folders = new Map();
+  const files = [];
+  for (const entry of (await listEditorDir(spawns.MAPS_DIR)) || []) {
+    const map = spawns.folderMap(entry.name);
+    if (entry.type !== 'dir' || map < 0) continue;
+    const inside = (await listEditorDir(`${spawns.MAPS_DIR}/${entry.name}`)) || [];
+    if (inside.some((f) => f.type === 'file' && f.name === gatesLib.GATE_FILE)) {
+      if (files.some((f) => f.map === map)) {
+        throw new gatesLib.GateError(`Dos carpetas para el mapa ${map}: '${folders.get(map)}' y '${entry.name}'`);
+      }
+      files.push({ path: `${spawns.MAPS_DIR}/${entry.name}/${gatesLib.GATE_FILE}`, map });
+      folders.set(map, entry.name);
+    } else if (!folders.has(map)) {
+      folders.set(map, entry.name);
+    }
+  }
+  return { files, folders };
+}
+
+// { format: 'txt' | 'toml', content } con el texto de Gate.txt.
+async function readGates() {
+  const { files } = await findGateTomlFiles();
+  if (!files.length) {
+    return { format: 'txt', content: await readEditorFile(GATE_TXT) };
+  }
+  const loaded = await Promise.all(files.map(async (f) => ({ ...f, content: await readEditorFile(f.path) })));
+  return { format: 'toml', files: files.map((f) => f.path), content: gatesLib.buildLegacy(gatesLib.parseToml(loaded)) };
+}
+
+// Escribe los Gates.toml y borra los de los mapas que quedaron sin gates.
+async function writeGateToml(gates, files, folders) {
+  const out = gatesLib.buildToml(gates, { mapName: await mapNameLookup(), folders });
+  let backups = [];
+  for (const [path, content] of Object.entries(out)) {
+    const data = await editorRequest('POST', '/api/file', { path, content });
+    backups = backups.concat(data.backups || []);
+  }
+  for (const f of files) {
+    if (!out[f.path]) {
+      const data = await editorRequest('POST', '/api/delete', { path: f.path });
+      backups = backups.concat(data.backups || []);
+    }
+  }
+  return { files: Object.keys(out), backups };
+}
+
+function gateErrorStatus(err) {
+  return err instanceof gatesLib.GateError ? 400 : (err.status || 502);
+}
+
+// Zonas (zonas seguras, sin PK y NPCs que mueven): el GameServer usa los
+// Data/Maps/NN-Nombre/Zones.toml si hay alguno y si no, los .txt de
+// Data/Custom. El editor carga y guarda cada lista por separado con el texto de
+// su .txt; con los TOML el panel convierte en los dos sentidos.
+async function findZoneTomlFiles() {
+  const folders = new Map();
+  const files = [];
+  for (const entry of (await listEditorDir(spawns.MAPS_DIR)) || []) {
+    const map = spawns.folderMap(entry.name);
+    if (entry.type !== 'dir' || map < 0) continue;
+    const inside = (await listEditorDir(`${spawns.MAPS_DIR}/${entry.name}`)) || [];
+    if (inside.some((f) => f.type === 'file' && f.name === zonesLib.ZONE_FILE)) {
+      if (files.some((f) => f.map === map)) {
+        throw new zonesLib.ZoneError(`Dos carpetas para el mapa ${map}: '${folders.get(map)}' y '${entry.name}'`);
+      }
+      files.push({ path: `${spawns.MAPS_DIR}/${entry.name}/${zonesLib.ZONE_FILE}`, map });
+      folders.set(map, entry.name);
+    } else if (!folders.has(map)) {
+      folders.set(map, entry.name);
+    }
+  }
+  return { files, folders };
+}
+
+async function readZoneToml(files) {
+  const loaded = await Promise.all(files.map(async (f) => ({ ...f, content: await readEditorFile(f.path) })));
+  return zonesLib.parseToml(loaded);
+}
+
+// Escribe los Zones.toml con `data` y borra los de los mapas que quedaron vacíos.
+async function writeZoneToml(data, files, folders) {
+  const out = zonesLib.buildToml(data, { mapName: await mapNameLookup(), folders });
+  let backups = [];
+  for (const [path, content] of Object.entries(out)) {
+    const result = await editorRequest('POST', '/api/file', { path, content });
+    backups = backups.concat(result.backups || []);
+  }
+  for (const f of files) {
+    if (!out[f.path]) {
+      const result = await editorRequest('POST', '/api/delete', { path: f.path });
+      backups = backups.concat(result.backups || []);
+    }
+  }
+  return { files: Object.keys(out), backups };
+}
+
+function zoneErrorStatus(err) {
+  return err instanceof zonesLib.ZoneError ? 400 : (err.status || 502);
+}
+
+// Editor por carpeta de mapa (lib/map-folders.js), sobre el editor del server.
+const mapFolders = mapFoldersLib.create({
+  list: listEditorDir,
+  read: readEditorFile,
+  write: (path, content) => editorRequest('POST', '/api/file', { path, content }),
+  remove: (path) => editorRequest('POST', '/api/delete', { path })
+}, { names: () => spawnNames() });
+
+function mapFolderRoute(handler) {
+  return async (req, res) => {
+    if (!editorEnabled) {
+      return res.status(503).json({ error: 'Editor disabled' });
+    }
+    try {
+      return res.json(await handler(req));
+    } catch (err) {
+      return res.status(mapFoldersLib.errorStatus(err)).json({ error: err.message });
+    }
+  };
+}
+
+app.get('/admin/server-editor/api/map-folders', requireAdmin, requireAdminPasswordChange,
+  mapFolderRoute(() => mapFolders.summary()));
+
+app.get('/admin/server-editor/api/map-folders/file', requireAdmin, requireAdminPasswordChange,
+  mapFolderRoute((req) => mapFolders.read(String(req.query.folder || ''), String(req.query.kind || ''))));
+
+// { folder, kind, content, check } — con check sólo valida.
+app.post('/admin/server-editor/api/map-folders/file', requireAdmin, requireAdminPasswordChange,
+  mapFolderRoute((req) => mapFolders.save(String(req.body?.folder || ''), String(req.body?.kind || ''), req.body?.content, !!req.body?.check)));
+
+// Modo visual del Spawns.toml: { folder, content } -> { entries } y
+// { folder, entries } -> { content }. No escriben nada.
+app.post('/admin/server-editor/api/map-folders/spawns/parse', requireAdmin, requireAdminPasswordChange,
+  mapFolderRoute((req) => mapFolders.spawnEntries(String(req.body?.folder || ''), req.body?.content)));
+
+app.post('/admin/server-editor/api/map-folders/spawns/build', requireAdmin, requireAdminPasswordChange,
+  mapFolderRoute((req) => mapFolders.spawnText(String(req.body?.folder || ''), req.body?.entries)));
+
+app.post('/admin/server-editor/api/map-folders/delete', requireAdmin, requireAdminPasswordChange,
+  mapFolderRoute((req) => mapFolders.remove(String(req.body?.folder || ''), String(req.body?.kind || ''))));
+
 async function spawnNames() {
   const [maps, monsters] = await Promise.all([
-    readEditorFile('Data/MapManager.txt').then(parseMapManager).catch(() => []),
+    readMapManager().then((m) => parseMapManager(m.content)).catch(() => []),
     readEditorFile('Data/Monster/Monster.txt').then(parseMonsterTxt).catch(() => [])
   ]);
   const mapNames = new Map(maps.map((m) => [m.id, m.name]));
@@ -2214,10 +2531,9 @@ app.get('/admin/server-editor/api/gates', requireAdmin, requireAdminPasswordChan
     return res.status(503).json({ error: 'Editor disabled' });
   }
   try {
-    const data = await editorRequest('GET', `/api/file?path=${encodeURIComponent('Data/Move/Gate.txt')}`);
-    return res.json({ content: data.content || '' });
+    return res.json(await readGates());
   } catch (err) {
-    return res.status(err.status || 502).json({ error: err.message });
+    return res.status(gateErrorStatus(err)).json({ error: err.message });
   }
 });
 
@@ -2227,13 +2543,33 @@ app.post('/admin/server-editor/api/gates', requireAdmin, requireAdminPasswordCha
   }
   try {
     const content = String(req.body?.content ?? '');
-    const data = await editorRequest('POST', '/api/file', {
-      path: 'Data/Move/Gate.txt',
-      content
-    });
-    return res.json({ ok: true, backups: data.backups || [] });
+    const { files, folders } = await findGateTomlFiles();
+    if (!files.length) {
+      const data = await editorRequest('POST', '/api/file', { path: GATE_TXT, content });
+      return res.json({ ok: true, format: 'txt', backups: data.backups || [] });
+    }
+    const written = await writeGateToml(gatesLib.parseLegacy(content), files, folders);
+    return res.json({ ok: true, format: 'toml', ...written });
   } catch (err) {
-    return res.status(err.status || 502).json({ error: err.message });
+    return res.status(gateErrorStatus(err)).json({ error: err.message });
+  }
+});
+
+// Pasa Gate.txt a un Gates.toml por mapa. No borra el .txt (queda como
+// respaldo); desde ahí el GameServer usa los TOML.
+app.post('/admin/server-editor/api/gates/convert', requireAdmin, requireAdminPasswordChange, async (req, res) => {
+  if (!editorEnabled) {
+    return res.status(503).json({ error: 'Editor disabled' });
+  }
+  try {
+    const { files, folders } = await findGateTomlFiles();
+    if (files.length) {
+      return res.status(409).json({ error: 'Las gates ya están en formato por mapa.' });
+    }
+    const written = await writeGateToml(gatesLib.parseLegacy(await readEditorFile(GATE_TXT)), [], folders);
+    return res.json({ ok: true, format: 'toml', ...written });
+  } catch (err) {
+    return res.status(gateErrorStatus(err)).json({ error: err.message });
   }
 });
 
@@ -2270,10 +2606,9 @@ app.get('/admin/server-editor/api/mapmanager', requireAdmin, requireAdminPasswor
     return res.status(503).json({ error: 'Editor disabled' });
   }
   try {
-    const data = await editorRequest('GET', `/api/file?path=${encodeURIComponent('Data/MapManager.txt')}`);
-    return res.json({ content: data.content || '' });
+    return res.json(await readMapManager());
   } catch (err) {
-    return res.status(err.status || 502).json({ error: err.message });
+    return res.status(mapErrorStatus(err)).json({ error: err.message });
   }
 });
 
@@ -2283,13 +2618,36 @@ app.post('/admin/server-editor/api/mapmanager', requireAdmin, requireAdminPasswo
   }
   try {
     const content = String(req.body?.content ?? '');
-    const data = await editorRequest('POST', '/api/file', {
-      path: 'Data/MapManager.txt',
-      content
-    });
-    return res.json({ ok: true, backups: data.backups || [] });
+    const { files, folders } = await findMapTomlFiles();
+    if (!files.length) {
+      const data = await editorRequest('POST', '/api/file', { path: MAP_MANAGER_TXT, content });
+      return res.json({ ok: true, format: 'txt', backups: data.backups || [] });
+    }
+    // El .txt no trae la música: se conserva la de los Map.toml actuales.
+    const current = await Promise.all(files.map(async (f) => ({ ...f, content: await readEditorFile(f.path) })));
+    const maps = mapsLib.keepMusic(mapsLib.parseLegacy(content), mapsLib.parseToml(current));
+    const written = await writeMapToml(maps, files, folders);
+    return res.json({ ok: true, format: 'toml', ...written });
   } catch (err) {
-    return res.status(err.status || 502).json({ error: err.message });
+    return res.status(mapErrorStatus(err)).json({ error: err.message });
+  }
+});
+
+// Pasa MapManager.txt a un Map.toml por mapa. No borra el .txt (queda como
+// respaldo); desde ahí el GameServer usa los TOML.
+app.post('/admin/server-editor/api/mapmanager/convert', requireAdmin, requireAdminPasswordChange, async (req, res) => {
+  if (!editorEnabled) {
+    return res.status(503).json({ error: 'Editor disabled' });
+  }
+  try {
+    const { files, folders } = await findMapTomlFiles();
+    if (files.length) {
+      return res.status(409).json({ error: 'Las reglas de los mapas ya están en formato por mapa.' });
+    }
+    const written = await writeMapToml(mapsLib.parseLegacy(await readEditorFile(MAP_MANAGER_TXT)), [], folders);
+    return res.json({ ok: true, format: 'toml', ...written });
+  } catch (err) {
+    return res.status(mapErrorStatus(err)).json({ error: err.message });
   }
 });
 
@@ -2385,9 +2743,62 @@ async function readFileReference(table) {
   return translations.parseReference(reference.content, table);
 }
 
-// Las líneas de tooltip originales salen de los JSON de Data/Custom/Items: una entrada
+// Datos extra de los items (Fase 5): Data/Items/NN-nombre.toml, uno por sección.
+// Si no hay ninguno (server sin convertir con `mu-data import-items`), el panel
+// sigue con los archivos de antes.
+async function readItemSections() {
+  const names = await editorFileNames(itemExtras.ITEMS_DIR);
+  const out = {};
+  for (const name of names) {
+    const section = itemExtras.fileSection(name);
+    if (section < 0) continue;
+    const path = `${itemExtras.ITEMS_DIR}/${name}`;
+    const text = await readEditorFile(path);
+    out[section] = { path, text, items: itemExtras.parseSection(text, name) };
+  }
+  return out;
+}
+
+async function writeItemSection(sections, section, text) {
+  const path = sections[section]?.path || itemExtras.sectionPath(section);
+  return editorRequest('POST', '/api/file', { path, content: text });
+}
+
+function itemNameMap(items) {
+  return Object.fromEntries(items.map((item) => [item.key.join(','), item.name]));
+}
+
+// Lo que el editor de items custom muestra como "JSON del item" y "JSON del pet",
+// armado desde el TOML de la sección.
+function extrasToJson(kind, key, item) {
+  if (!item) return null;
+  if (kind === 'pets') return item.pet ? { item: `${key[0]},${key[1]}`, ...item.pet } : null;
+  const out = { item: `${key[0]},${key[1]}` };
+  for (const field of ['inventory', 'effects', 'tooltip']) {
+    if (item[field] !== undefined) out[field] = item[field];
+  }
+  return Object.keys(out).length > 1 ? out : null;
+}
+
+// Las líneas de tooltip originales salen de los items custom: una entrada
 // por línea, con el nombre del item para reconocerla.
 async function readTooltipReference() {
+  const sections = await readItemSections();
+  if (Object.keys(sections).length) {
+    const items = await readItemList();
+    const nameOf = new Map(items.map((item) => [item.key.join(','), item.name]));
+    const out = [];
+    for (const section of Object.keys(sections).map(Number).sort((a, b) => a - b)) {
+      for (const [index, item] of Object.entries(sections[section].items)) {
+        const lines = Array.isArray(item.tooltip) ? item.tooltip : [];
+        lines.slice(0, customItems.MAX_TOOLTIP_LINES).forEach((line, n) => {
+          const text = typeof line === 'string' ? line : line?.text;
+          if (typeof text === 'string' && text !== '') out.push({ key: [section, Number(index), n], name: text, label: nameOf.get(`${section},${index}`) || '' });
+        });
+      }
+    }
+    return out;
+  }
   const [names, items] = await Promise.all([editorFileNames(customItems.KINDS.items), readItemList()]);
   const nameOf = new Map(items.map((item) => [item.key.join(','), item.name]));
   const out = [];
@@ -2491,15 +2902,27 @@ app.get('/admin/server-editor/api/custom-items', requireAdmin, requireAdminPassw
     return res.status(503).json({ error: 'Editor disabled' });
   }
   try {
-    const [items, itemFiles, petFiles] = await Promise.all([
-      readItemList(),
-      editorFileNames(customItems.KINDS.items),
-      editorFileNames(customItems.KINDS.pets)
-    ]);
-    const keys = (names) => names.map(customItems.keyFromFileName).filter(Boolean);
+    const sections = await readItemSections();
+    let files;
+    if (Object.keys(sections).length) {
+      files = { items: [], pets: [] };
+      for (const section of Object.keys(sections).map(Number).sort((a, b) => a - b)) {
+        for (const index of Object.keys(sections[section].items).map(Number).sort((a, b) => a - b)) {
+          const key = [section, index];
+          if (extrasToJson('items', key, sections[section].items[index])) files.items.push(key);
+          if (extrasToJson('pets', key, sections[section].items[index])) files.pets.push(key);
+        }
+      }
+    } else {
+      const [itemFiles, petFiles] = await Promise.all([editorFileNames(customItems.KINDS.items), editorFileNames(customItems.KINDS.pets)]);
+      const keys = (names) => names.map(customItems.keyFromFileName).filter(Boolean);
+      files = { items: keys(itemFiles), pets: keys(petFiles) };
+    }
+    const items = await readItemList();
     return res.json({
       items,
-      files: { items: keys(itemFiles), pets: keys(petFiles) },
+      files,
+      storage: Object.keys(sections).length ? 'toml' : 'json',
       colors: customItems.TOOLTIP_COLORS,
       maxTooltipLines: customItems.MAX_TOOLTIP_LINES,
       layouts: Array.from({ length: 16 }, (_, section) => itemRows.statColumns(section)),
@@ -2521,6 +2944,11 @@ app.get('/admin/server-editor/api/custom-items/file', requireAdmin, requireAdmin
     return res.status(400).json({ error: 'Pedido inválido' });
   }
   try {
+    const sections = await readItemSections();
+    if (Object.keys(sections).length) {
+      const data = extrasToJson(kind, key, sections[key[0]]?.items[key[1]]);
+      return data ? res.json({ exists: true, header: [], data, hasInnerComments: false }) : res.json({ exists: false });
+    }
     let content;
     try {
       content = (await editorRequest('GET', `/api/file?path=${encodeURIComponent(customItems.pathFor(kind, key))}`)).content;
@@ -2561,6 +2989,24 @@ app.post('/admin/server-editor/api/custom-items/file', requireAdmin, requireAdmi
     }
     if (errors.length > 0) {
       return res.status(400).json({ error: 'El archivo tiene errores', errors });
+    }
+    const sections = await readItemSections();
+    if (Object.keys(sections).length) {
+      const item = { ...(sections[key[0]]?.items[key[1]] || {}) };
+      if (kind === 'pets') {
+        const { item: _ignored, ...pet } = body;
+        item.pet = pet;
+      } else {
+        for (const field of ['inventory', 'effects', 'tooltip']) {
+          if (body[field] !== undefined) item[field] = body[field];
+          else delete item[field];
+        }
+      }
+      const names = itemNameMap(await readItemList());
+      const text = itemExtras.replaceItem(sections[key[0]]?.text || '', key[0], key[1], item, names[key.join(',')] || '');
+      itemExtras.parseSection(text, itemExtras.sectionFileName(key[0]));
+      const saved = await writeItemSection(sections, key[0], text);
+      return res.json({ ok: true, backups: saved.backups || [] });
     }
     const header = Array.isArray(req.body?.header) ? req.body.header.map(String) : [];
     const saved = await editorRequest('POST', '/api/file', {
@@ -2630,6 +3076,17 @@ app.post('/admin/server-editor/api/custom-items/delete', requireAdmin, requireAd
     return res.status(400).json({ error: 'Pedido inválido' });
   }
   try {
+    const sections = await readItemSections();
+    if (Object.keys(sections).length) {
+      const current = sections[key[0]]?.items[key[1]];
+      if (!current) return res.json({ ok: true, backups: [] });
+      const item = { ...current };
+      if (kind === 'pets') delete item.pet;
+      else for (const field of ['inventory', 'effects', 'tooltip']) delete item[field];
+      const text = itemExtras.replaceItem(sections[key[0]].text, key[0], key[1], item);
+      const saved = await writeItemSection(sections, key[0], text);
+      return res.json({ ok: true, backups: saved.backups || [] });
+    }
     const data = await editorRequest('POST', '/api/delete', { path: customItems.pathFor(kind, key) });
     return res.json({ ok: true, backups: data.backups || [] });
   } catch (err) {
@@ -2759,14 +3216,20 @@ app.get('/admin/server-editor/api/custom', requireAdmin, requireAdminPasswordCha
     return res.status(503).json({ error: 'Editor disabled' });
   }
   try {
-    const filePath = getCustomFilePath(req.query.kind);
+    const kind = String(req.query.kind || '').toLowerCase();
+    const filePath = getCustomFilePath(kind);
     if (!filePath) {
       return res.status(400).json({ error: 'Tipo de custom invalido' });
     }
-    const data = await editorRequest('GET', `/api/file?path=${encodeURIComponent(filePath)}`);
-    return res.json({ content: data.content || '' });
+    const { files } = await findZoneTomlFiles();
+    if (!files.length) {
+      const data = await editorRequest('GET', `/api/file?path=${encodeURIComponent(filePath)}`);
+      return res.json({ format: 'txt', content: data.content || '' });
+    }
+    const zones = await readZoneToml(files);
+    return res.json({ format: 'toml', content: zonesLib.buildLegacy(kind, zones[kind]) });
   } catch (err) {
-    return res.status(err.status || 502).json({ error: err.message });
+    return res.status(zoneErrorStatus(err)).json({ error: err.message });
   }
 });
 
@@ -2775,18 +3238,47 @@ app.post('/admin/server-editor/api/custom', requireAdmin, requireAdminPasswordCh
     return res.status(503).json({ error: 'Editor disabled' });
   }
   try {
-    const filePath = getCustomFilePath(req.query.kind);
+    const kind = String(req.query.kind || '').toLowerCase();
+    const filePath = getCustomFilePath(kind);
     if (!filePath) {
       return res.status(400).json({ error: 'Tipo de custom invalido' });
     }
     const content = String(req.body?.content ?? '');
-    const data = await editorRequest('POST', '/api/file', {
-      path: filePath,
-      content
-    });
-    return res.json({ ok: true, backups: data.backups || [] });
+    const { files, folders } = await findZoneTomlFiles();
+    if (!files.length) {
+      const data = await editorRequest('POST', '/api/file', { path: filePath, content });
+      return res.json({ ok: true, format: 'txt', backups: data.backups || [] });
+    }
+    // Sólo cambia la lista de `kind`; las otras dos quedan como están.
+    const zones = await readZoneToml(files);
+    zones[kind] = zonesLib.parseLegacy(kind, content);
+    const written = await writeZoneToml(zones, files, folders);
+    return res.json({ ok: true, format: 'toml', ...written });
   } catch (err) {
-    return res.status(err.status || 502).json({ error: err.message });
+    return res.status(zoneErrorStatus(err)).json({ error: err.message });
+  }
+});
+
+// Pasa los tres .txt de Data/Custom a un Zones.toml por mapa. No borra los .txt
+// (quedan como respaldo); desde ahí el GameServer usa los TOML.
+app.post('/admin/server-editor/api/custom/convert', requireAdmin, requireAdminPasswordChange, async (req, res) => {
+  if (!editorEnabled) {
+    return res.status(503).json({ error: 'Editor disabled' });
+  }
+  try {
+    const { files, folders } = await findZoneTomlFiles();
+    if (files.length) {
+      return res.status(409).json({ error: 'Las zonas ya están en formato por mapa.' });
+    }
+    const zones = {};
+    for (const kind of zonesLib.KINDS) {
+      const text = await readEditorFile(getCustomFilePath(kind)).catch(() => '');
+      zones[kind] = zonesLib.parseLegacy(kind, text);
+    }
+    const written = await writeZoneToml(zones, [], folders);
+    return res.json({ ok: true, format: 'toml', ...written });
+  } catch (err) {
+    return res.status(zoneErrorStatus(err)).json({ error: err.message });
   }
 });
 
@@ -2840,6 +3332,16 @@ app.get('/admin/server-editor/api/items-base', requireAdmin, requireAdminPasswor
     return res.status(400).json({ error: 'Tipo invalido.' });
   }
   try {
+    const kind = String(req.query.kind).toLowerCase();
+    if (kind !== 'item') {
+      // Con Data/Items el precio y el apilado viven en el TOML de cada sección;
+      // el editor sigue viendo la tabla de siempre.
+      const sections = await readItemSections();
+      if (Object.keys(sections).length) {
+        const items = Object.fromEntries(Object.entries(sections).map(([section, data]) => [section, data.items]));
+        return res.json({ format: 'toml', content: itemExtras.buildRows(kind, items, itemNameMap(await readItemList())) });
+      }
+    }
     const data = await editorRequest('GET', `/api/file?path=${encodeURIComponent(path)}`);
     return res.json({ content: data.content || '' });
   } catch (err) {
@@ -2857,6 +3359,20 @@ app.post('/admin/server-editor/api/items-base', requireAdmin, requireAdminPasswo
   }
   try {
     const content = String(req.body?.content ?? '');
+    const kind = String(req.query.kind).toLowerCase();
+    if (kind !== 'item') {
+      const sections = await readItemSections();
+      if (Object.keys(sections).length) {
+        const files = Object.fromEntries(Object.entries(sections).map(([section, data]) => [section, data.text]));
+        const changed = itemExtras.applyRows(kind, itemExtras.parseRows(kind, content), files, itemNameMap(await readItemList()));
+        const backups = [];
+        for (const [section, text] of Object.entries(changed)) {
+          const saved = await writeItemSection(sections, Number(section), text);
+          backups.push(...(saved.backups || []));
+        }
+        return res.json({ ok: true, backups });
+      }
+    }
     const data = await editorRequest('POST', '/api/file', { path, content });
     return res.json({ ok: true, backups: data.backups || [] });
   } catch (err) {
@@ -2869,10 +3385,14 @@ app.get('/admin/server-editor/api/drop', requireAdmin, requireAdminPasswordChang
     return res.status(503).json({ error: 'Editor disabled' });
   }
   try {
-    const data = await editorRequest('GET', `/api/file?path=${encodeURIComponent('Data/Item/ItemDrop.txt')}`);
-    return res.json({ content: data.content || '' });
+    const { files } = await findDropTomlFiles();
+    if (!files.length) {
+      return res.json({ format: 'txt', content: await readEditorFile(ITEM_DROP_TXT) });
+    }
+    const loaded = await Promise.all(files.map(async (f) => ({ ...f, content: await readEditorFile(f.path) })));
+    return res.json({ format: 'toml', files: files.map((f) => f.path), content: dropsLib.buildLegacy(dropsLib.parseToml(loaded)) });
   } catch (err) {
-    return res.status(err.status || 502).json({ error: err.message });
+    return res.status(dropErrorStatus(err)).json({ error: err.message });
   }
 });
 
@@ -2882,13 +3402,33 @@ app.post('/admin/server-editor/api/drop', requireAdmin, requireAdminPasswordChan
   }
   try {
     const content = String(req.body?.content ?? '');
-    const data = await editorRequest('POST', '/api/file', {
-      path: 'Data/Item/ItemDrop.txt',
-      content
-    });
-    return res.json({ ok: true, backups: data.backups || [] });
+    const { files, folders } = await findDropTomlFiles();
+    if (!files.length) {
+      const data = await editorRequest('POST', '/api/file', { path: ITEM_DROP_TXT, content });
+      return res.json({ ok: true, format: 'txt', backups: data.backups || [] });
+    }
+    const written = await writeDropToml(dropsLib.parseLegacy(content), files, folders);
+    return res.json({ ok: true, format: 'toml', ...written });
   } catch (err) {
-    return res.status(err.status || 502).json({ error: err.message });
+    return res.status(dropErrorStatus(err)).json({ error: err.message });
+  }
+});
+
+// Pasa ItemDrop.txt a Items/Drops.toml y un Drops.toml por mapa. No borra el
+// .txt (queda como respaldo); desde ahí el GameServer usa los TOML.
+app.post('/admin/server-editor/api/drop/convert', requireAdmin, requireAdminPasswordChange, async (req, res) => {
+  if (!editorEnabled) {
+    return res.status(503).json({ error: 'Editor disabled' });
+  }
+  try {
+    const { files, folders } = await findDropTomlFiles();
+    if (files.length) {
+      return res.status(409).json({ error: 'Los drops ya están en formato por mapa.' });
+    }
+    const written = await writeDropToml(dropsLib.parseLegacy(await readEditorFile(ITEM_DROP_TXT)), [], folders);
+    return res.json({ ok: true, format: 'toml', ...written });
+  } catch (err) {
+    return res.status(dropErrorStatus(err)).json({ error: err.message });
   }
 });
 

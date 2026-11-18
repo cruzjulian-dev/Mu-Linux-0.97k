@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SUPPORT = r'''
 #ifndef _WIN32
 using WORD = std::uint16_t;
@@ -47,7 +53,7 @@ MAIN = r'''
 void* Call(OBJECT* object, int action) { return CALL_ACTION; }
 void Cast(OBJECT* object) { CALL_CAST; }
 std::uint64_t RunCasting(BYTE* models, OBJECT* object) {
-    DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models);
+    Models = reinterpret_cast<std::uintptr_t>(models);
     digest = 14695981039346656037ull;
     for(short type : {0, 1, 302, 390})
     for(short limit : {0, 5, 6, 87, 88})
@@ -72,7 +78,7 @@ std::uint64_t RunCasting(BYTE* models, OBJECT* object) {
     return digest;
 }
 void RunAll(BYTE* models, BYTE* pool) {
-    DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models);
+    Models = reinterpret_cast<std::uintptr_t>(models);
     CharactersClient = reinterpret_cast<std::uintptr_t>(pool);
     const short limit = 150;
     std::memcpy(models + 390 * 188 + 38, &limit, 2);
@@ -100,7 +106,7 @@ void RunAll(BYTE* models, BYTE* pool) {
     }
 }
 std::uint64_t Run(BYTE* models, OBJECT* object) {
-    DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models);
+    Models = reinterpret_cast<std::uintptr_t>(models);
     digest = 14695981039346656037ull;
     for(short type = 0; type < 8; ++type)
     for(short limit : {-1, 0, 1, 76, 77, 255, 32767})
@@ -131,7 +137,7 @@ std::uint64_t Run(BYTE* models, OBJECT* object) {
         Hash(object, sizeof(*object)); Hash(&accepted, sizeof(accepted));
     }
     Require(Call(nullptr, 76) == nullptr);
-    DAT_05828d58 = 0;
+    Models = 0;
     OBJECT unchanged; std::memcpy(&unchanged, object, sizeof(unchanged));
     Require(Call(object, 76) == nullptr && std::memcmp(object, &unchanged, sizeof(unchanged)) == 0);
     return digest;
@@ -169,12 +175,12 @@ int main() {
 def harness(revision=None):
     header = read_source("src/globals.h", revision)
     globals_source = read_source("src/globals.cpp", revision)
-    declaration = re.search(r"extern [^;\n]*\bDAT_05828d58\s*;", header).group()
-    definition = re.search(r"^[^/\n]*\bDAT_05828d58\s*=\s*[^;]+;", globals_source, re.M).group()
-    declaration += re.search(r"extern [^;\n]*\bCharactersClient\s*;", header).group()
+    declaration = optional_definition(re.search(r"extern [^;\n]*\bModels\s*;", header))
+    definition = re.search(r"^[^/\n]*\bModels\s*=\s*[^;]+;", globals_source, re.M).group()
+    declaration += optional_definition(re.search(r"extern [^;\n]*\bCharactersClient\s*;", header))
     definition += re.search(r"^[^/\n]*\bCharactersClient\s*=\s*[^;]+;", globals_source, re.M).group()
-    all_actions = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "Characters_SetActionAll")
-    types = read_source("src/Entity/EntityTypes.h", revision)
+    all_actions = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "Characters_SetActionAll")
+    types = read_source("src/game/entity/EntityTypes.h", revision)
     support = SUPPORT
     for token, name, kind in (("TYPE_FIELD", "Type", "short"),
                               ("CURRENT_FIELD", "CurrentAction", "BYTE"),
@@ -182,8 +188,8 @@ def harness(revision=None):
                               ("FRAME_FIELD", "AnimationFrame", "float"),
                               ("PRIOR_FRAME_FIELD", "PriorAnimationFrame", "float")):
         support = re.sub(rf"\b{token}\b", re.search(rf"\b{kind}\s+{name}\s*;", types).group(), support)
-    action = function(read_source("src/Entity/Entity_ActionLegacy.cpp", revision), "SetAction")
-    casting = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "SetPlayerTeleport")
+    action = function(read_source("src/game/entity/Entity_ActionLegacy.cpp", revision), "SetAction")
+    casting = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "SetPlayerTeleport")
     call = "SetAction(object, action)" if "OBJECT* entity_ptr" in action else "SetAction(static_cast<int>(reinterpret_cast<std::uintptr_t>(object)), action)"
     cast_arg = "object" if "OBJECT* param_1" in casting else "static_cast<int>(reinterpret_cast<std::uintptr_t>(object))"
     return (PREAMBLE.split("BYTE* reservation;")[0].replace("0x10000", "0x100000") + declaration + definition

@@ -806,6 +806,12 @@ void CCommandManager::CommandAddPoint(LPOBJ lpObj, char* arg, int type)
 		gLog.Output(LOG_COMMAND, "[CommandAddPoint][%s][%s] - (Type: %d, Amount: %d)", lpObj->Account, lpObj->Name, type, amount);
 	}
 
+#if(GAMESERVER_EXTRA==1)
+
+	gObjFillViewStats(lpObj, &pMsg.Stats);
+
+#endif
+
 	DataSend(lpObj->Index, (BYTE*)&pMsg, pMsg.header.size);
 }
 
@@ -2144,7 +2150,7 @@ void CCommandManager::CommandGMEventStart(LPOBJ lpObj, char* arg, int command)
 		while (*end == ' ') ++end;
 		if (errno || !hasNumber || *end || value < 0 || value >= MAX_INVASION)
 		{
-			gNotice.GCNoticeSend(lpObj->Index, 1, "Uso: /invasionstart <indice de InvasionManager.dat>");
+			gNotice.GCNoticeSend(lpObj->Index, 1, "Uso: /invasionstart <indice de la invasion>");
 			return;
 		}
 		invasion = (int)value;

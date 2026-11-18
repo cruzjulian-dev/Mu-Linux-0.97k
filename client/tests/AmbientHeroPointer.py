@@ -8,6 +8,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 #ifndef _WIN32
 #define __stdcall
@@ -53,7 +59,7 @@ std::uint64_t Run(BYTE* memory){
    if(RandomAt(3)%4==0){
     const float x=static_cast<float>(double(original[0])+(RandomAt(0)%900)-300);
     const float y=static_cast<float>(double(original[1])+(RandomAt(1)%900)-300);
-    const float z=static_cast<float>(double(original[2])+(RandomAt(2)%50)+double(_DAT_00552994));
+    const float z=static_cast<float>(double(original[2])+(RandomAt(2)%50)+double(250.0f));
     wanted.insert(wanted.end(),{4,Bits(x),Bits(y),Bits(z)});++emitted;
    }
   }
@@ -72,7 +78,7 @@ int main(){
 }
 '''
 def harness(revision=None):
-    source=read_source('src/Scene/Scene_ObjectUpdate.cpp',revision)
+    source=read_source('src/scenes/Scene_ObjectUpdate.cpp',revision)
     # Adapta la extracción sin cambiar el __stdcall del cuerpo compilado.
     move=function(source.replace('void __stdcall MoveObjects','void __cdecl MoveObjects'),'MoveObjects').replace('void __cdecl MoveObjects','void __stdcall MoveObjects')
     # Tres casts de owner ajenos a esta causa siguen en producción; sus ramas
@@ -83,7 +89,7 @@ def harness(revision=None):
         move=move.replace(expression,'static_cast<int>(reinterpret_cast<std::uintptr_t>('+pointer+'))')
     header=read_source('src/globals.h',revision)
     alias=re.search(r'^#define DAT_083a021c\s+[^\n]+',header,re.M).group(0)
-    height=re.search(r'^float\s+_DAT_00552994\s*=\s*[^;]+;',read_source('src/globals.cpp',revision),re.M).group(0)
+    height=optional_definition(re.search(r'^float\s+_DAT_00552994\s*=\s*[^;]+;',read_source('src/globals.cpp',revision),re.M))
     return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES.replace('GRID_ALIAS',alias).replace('HEIGHT',height)+move+MAIN
 
 def main():

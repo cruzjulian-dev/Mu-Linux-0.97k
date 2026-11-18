@@ -50,7 +50,7 @@ int main() {
 
 
 def dispatch(revision=None):
-    return function(read_source("src/Util/Misc.cpp",revision),"Packet_ParseReceived")
+    return function(read_source("src/app/util/Misc.cpp",revision),"Packet_ParseReceived")
 
 
 def harness(revision=None):
@@ -59,10 +59,10 @@ def harness(revision=None):
 
 def integrated_harness(revision=None):
     prefix=input_harness(revision).removesuffix(INPUT_MAIN)+"\nusing byte=BYTE; using undefined4=std::uint32_t;\n"
-    prefix+=function(read_source("src/Scene/Scene_CharSelect_Nav.cpp",revision),"Packet_ParseType2")
+    prefix+=function(read_source("src/scenes/Scene_CharSelect_Nav.cpp",revision),"Packet_ParseType2")
     prefix+=dispatch(revision)
     main=INPUT_MAIN.replace("quest[0x1c87f]=static_cast<BYTE>(next()%2)","quest[0x1c87f]=static_cast<BYTE>(next()%4)")
-    invocation="if(proceed) Require(CSQuest_ProceedButton(quest)==1); else FUN_00401af0(quest);"
+    invocation="if(proceed) Require(CSQuest_ProceedButton(quest)==1); else Quest_AnswerHitTest(quest);"
     if main.count(invocation)!=1: raise ValueError("Cambió el fixture de entrada de quest")
     return prefix+main.replace(invocation,"Require(Packet_ParseReceived(quest)==1);")
 

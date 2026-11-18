@@ -30,6 +30,11 @@ bin/Client/opengl32.dll.apitrace
 # cliente; nosotros las mandamos a esta carpeta (desviacion documentada en
 # Game_MainLoop, SCREENSHOT_DIR_DEVIATION).
 bin/Client/Screenshots/
+
+# Caché del catálogo de cada server (Item/ContentCatalog.cpp).
+bin/Client/Cache/
+# Estado del usuario (Fase 5, E1): Config.ini, Macro.txt, Cache, capturas y logs.
+bin/Client/User/
 bin/Client/Screen(*.jpg
 
 *.pch
@@ -47,7 +52,7 @@ lib/libjpeg/Release/
 lib/libjpeg/obj/
 
 # ─────────────────────────────────────────────────────────────
-#  Assets del juego (bin/Client/Data/)
+#  Assets del juego (bin/Client/System/ y bin/Client/Content/)
 #
 #  SE VERSIONAN. El repo es privado y sólo se comparte con
 #  colaboradores, así que los assets van adentro para que quien
@@ -104,5 +109,9 @@ Terrain_Render.obj
 doc-port/
 
 
-# Pack opcional de texturas HD (Data/HD): se distribuye aparte, no va en el repo
-bin/Client/Data/HD/
+# Capas de datos del jugador y de cada server (Platform/ContentLayers.h)
+bin/Client/Packs/
+bin/Client/Servers/
+
+# Caché de Python (tests y scripts)
+__pycache__/

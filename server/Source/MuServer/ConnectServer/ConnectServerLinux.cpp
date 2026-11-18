@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "MiniDump.h"
+#include "ClientContent.h"
+#include "SecureLink.h"
 #include "ServerDisplayer.h"
 #include "ServerList.h"
 #include "SocketManager.h"
@@ -24,6 +26,12 @@ int main()
 		WORD ConnectServerPortUDP = GetPrivateProfileInt("ConnectServerInfo", "ConnectServerPortUDP", 55557, "./ConnectServer.ini");
 		MaxIpConnection = GetPrivateProfileInt("ConnectServerInfo", "MaxIpConnection", 0, "./ConnectServer.ini");
 
+		// La clave del canal cifrado (la genera el GameServer en Data/Keys).
+		gSecureLink.Refresh();
+
+		// Los .toml del cliente que se reparten por el canal (Data/ClientContent).
+		gClientContent.Refresh(true);
+
 		if (gSocketManager.Start(ConnectServerPortTCP) != 0)
 		{
 			if (gSocketManagerUdp.Start(ConnectServerPortUDP) != 0)
@@ -47,6 +55,8 @@ int main()
 		if (now >= nextList)
 		{
 			gServerList.MainProc();
+			gSecureLink.Refresh();
+			gClientContent.Refresh();
 			nextList = now + std::chrono::seconds(1);
 		}
 

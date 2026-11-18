@@ -14,9 +14,9 @@ DWORD g_HashTableCtx[4];
 #define DAT_055c9bd0 g_HashTableCtx[2]
 #define DAT_055c9bd4 g_HashTableCtx[3]
 struct CNetwork{BYTE prefix[16];char m_SendSerial;BYTE gap[3];DWORD m_ReceiveSerial;BYTE suffix[11];void InitializePacketSerials();};
-CNetwork* active;BYTE* node;unsigned calls,start;bool receiveMissing;int DAT_055c9bf0;const char s_Hash_table_full______GetIndex_00558108[]="full";std::vector<DWORD> events;
+CNetwork* active;BYTE* node;unsigned calls,start;bool receiveMissing;int DAT_055c9bf0;const char s_Hash_table_full______GetIndex_00558108[]="Hash table full!!! GetIndex";std::vector<DWORD> events;
 uint Dispatch(void* key){Require(key==&active->m_SendSerial && calls<2);events.push_back(1);events.push_back(static_cast<BYTE>(active->m_SendSerial));++calls;return start;}
-void CErrorReport_Write(int* context,const char* message){Require(context==&DAT_055c9bf0 && message==s_Hash_table_full______GetIndex_00558108);events.push_back(2);}
+void CErrorReport_Write(int* context,const char* message){Require(context==&DAT_055c9bf0 && std::strcmp(message,s_Hash_table_full______GetIndex_00558108)==0);events.push_back(2);}
 void* AntiTamper_HashNode(){events.push_back(3);return node;}
 void HashTable_Insert(void* context,void* value,void* key){Require(context==&MAIN_HASH_CLASS && value==node && node[1]==1 && (key==&active->m_SendSerial || key==&active->m_ReceiveSerial));events.push_back(4);events.push_back(key==&active->m_SendSerial?0:1);}
 void* HashTable_GetNode(void* context,void* key){Require(context==&MAIN_HASH_CLASS && key==&active->m_SendSerial);events.push_back(5);return node;}
@@ -35,7 +35,7 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);const
 '''
 
 def harness(revision=None):
-    return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES+function(read_source('src/Net/Net_Connect.cpp',revision),'CNetwork::InitializePacketSerials')+MAIN
+    return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES+function(read_source('src/net/Net_Connect.cpp',revision),'CNetwork::InitializePacketSerials')+MAIN
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--architecture',choices=('Win32','x64'),default='x64');parser.add_argument('--generator');parser.add_argument('--reference-ref');args=parser.parse_args()

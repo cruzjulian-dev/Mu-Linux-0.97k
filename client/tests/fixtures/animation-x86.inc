@@ -20,7 +20,7 @@ void AnimateWithScratch(void* this_, float* param_1, float param_2, unsigned int
     short curFrame = (short)lv;
     *(short*)((char*)this_ + 0xa8) = curFrame;
     float fFrac = param_2 - (float)(int)curFrame;
-    float fFrac2 = _DAT_0055256c - fFrac;
+    float fFrac2 = 1.0f - fFrac;
 
 
 
@@ -53,12 +53,12 @@ void AnimateWithScratch(void* this_, float* param_1, float param_2, unsigned int
 
                     float posA[4], posB[4];
                     int   curFrameB = *(short*)((char*)this_ + 0xa8);
-                    posA[0] = *(float*)(animPtrA[1] + v39 * 0xc)     - param_6[0] * _DAT_005528b0;
+                    posA[0] = *(float*)(animPtrA[1] + v39 * 0xc)     - param_6[0] * 0.017453294f;
                     posA[1] = *(float*)(animPtrA[1] + v39 * 0xc + 4);
-                    posA[2] = *(float*)(animPtrA[1] + v39 * 0xc + 8) - param_6[1] * _DAT_005528b0;
-                    posB[0] = *(float*)(animPtrB[1] + curFrameB * 0xc)     - param_6[0] * _DAT_005528b0;
+                    posA[2] = *(float*)(animPtrA[1] + v39 * 0xc + 8) - param_6[1] * 0.017453294f;
+                    posB[0] = *(float*)(animPtrB[1] + curFrameB * 0xc)     - param_6[0] * 0.017453294f;
                     posB[1] = *(float*)(animPtrB[1] + curFrameB * 0xc + 4);
-                    posB[2] = *(float*)(animPtrB[1] + curFrameB * 0xc + 8) - param_6[1] * _DAT_005528b0;
+                    posB[2] = *(float*)(animPtrB[1] + curFrameB * 0xc + 8) - param_6[1] * 0.017453294f;
                     EulerToQuat(posA, quatA, 0, 0);
                     EulerToQuat(posB, quatB, 0, 0);
                 } else {

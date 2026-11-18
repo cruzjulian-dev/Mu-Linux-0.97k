@@ -13,8 +13,14 @@ import tempfile
 from ItemAnglePointer import harness as item_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
-BYTE* DAT_07e12840;
+BYTE* Items;
 OBJECT* expectedSparkle;
 bool inPool;
 int sparkleDraws, particleCalls;
@@ -24,7 +30,7 @@ int Particle_Spawn(int type, float* position, float* angle, float* light, int fl
     Require(type == 1230 && alpha == 1.0f && mode == 0 && flag == (particleCalls & 1));
     Require(light[0] == 1.0f && light[1] == 1.0f && light[2] == 1.0f);
     if(inPool) {
-        const auto offset = reinterpret_cast<BYTE*>(angle) - DAT_07e12840;
+        const auto offset = reinterpret_cast<BYTE*>(angle) - Items;
         Require(offset >= 100 && offset < 1000 * 516 && offset % 516 == 100);
     } else Require(angle == expectedSparkle->Angle);
     std::memcpy(lastSpark, position, sizeof(lastSpark));
@@ -61,7 +67,7 @@ std::uint64_t RunSparkle(OBJECT* object) {
     return digest;
 }
 std::uint64_t RunPool(BYTE* pool) {
-    DAT_07e12840 = pool; inPool = true; seed = 0x97c50376; digest = 14695981039346656037ull;
+    Items = pool; inPool = true; seed = 0x97c50376; digest = 14695981039346656037ull;
     std::memset(pool, 0xa5, 1000 * 516);
     for(int i = 0; i < 1000; ++i) {
         auto* object = reinterpret_cast<OBJECT*>(pool + i * 516 + 72);
@@ -104,9 +110,9 @@ def harness(revision=None):
     prefix = item_harness(revision).split("void CallItemAngle(OBJECT* object)", 1)[0]
     globals_source = read_source("src/globals.cpp", revision)
     for name in ("_DAT_005527d0", "_DAT_005528e4", "_DAT_00552a28"):
-        prefix += re.search(rf"^float\s+{name}\s*=[^;]+;", globals_source, re.M).group() + "\n"
-    sparkle = function(read_source("src/Entity/Entity_LegacyEffects.cpp", revision), "Entity_UpdateSparkleEffect").replace("_rand()", "SparkleRandom()")
-    move = function(read_source("src/Util/Misc.cpp", revision), "MoveItems")
+        prefix += optional_definition(re.search(rf"^float\s+{name}\s*=[^;]+;", globals_source, re.M)) + "\n"
+    sparkle = function(read_source("src/game/entity/Entity_LegacyEffects.cpp", revision), "Entity_UpdateSparkleEffect").replace("_rand()", "SparkleRandom()")
+    move = function(read_source("src/app/util/Misc.cpp", revision), "MoveItems")
     arg = "object" if "OBJECT* object" in sparkle else "static_cast<int>(reinterpret_cast<std::uintptr_t>(object))"
     return prefix + SERVICES + sparkle + move + MAIN.replace("CALL_SPARKLE", f"Entity_UpdateSparkleEffect({arg})")
 

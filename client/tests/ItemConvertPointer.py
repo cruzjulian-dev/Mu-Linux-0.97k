@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 int activeType, catalogMode;
 std::vector<int> catalogEvents;
@@ -39,7 +45,7 @@ std::uint64_t RunConvert(BYTE* memory,BYTE* tableMemory,BYTE* attributeMemory) {
     constexpr std::size_t tableBytes=8192*sizeof(ITEM_ATTRIBUTE);
     std::memset(tableMemory,0xa5,tableBytes+80); std::memset(table,0,tableBytes);
     std::vector<BYTE> expectedTable(tableBytes,0);
-    DAT_07d78068=0; DAT_07cf1ff4=nullptr; Convert(nullptr,0,0);
+    DAT_07d78068=0; CharacterAttribute=nullptr; Convert(nullptr,0,0);
     std::uint64_t digest=14695981039346656037ull;
     const short types[]={-32768,-1,0,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,31,34,65,67,68,69,70,96,97,100,103,105,106,127,128,134,135,136,143,145,146,159,160,167,170,195,196,223,224,255,256,384,385,386,387,388,389,390,391,395,399,411,418,419,423,424,425,426,427,428,429,430,511,512,513,1000,8191};
     const WORD requirements[]={0,1,255,32768,65535};
@@ -51,7 +57,7 @@ std::uint64_t RunConvert(BYTE* memory,BYTE* tableMemory,BYTE* attributeMemory) {
         item->Type=type; item->Durability=static_cast<BYTE>(next()); item->byColorState=static_cast<BYTE>(trial);
         item->x=static_cast<BYTE>(trial); item->y=static_cast<BYTE>(trial>>8);
         const WORD level=static_cast<WORD>(next()); std::memcpy(attribute+14,&level,2);
-        DAT_07cf1ff4=attribute; DAT_07d78068=trial%17==0?0:reinterpret_cast<std::uintptr_t>(table);
+        CharacterAttribute=attribute; DAT_07d78068=trial%17==0?0:reinterpret_cast<std::uintptr_t>(table);
         const int a1=static_cast<int>((trial&255)|(trial%13==0?0x80000000u:trial%13==1?0x7fffff00u:0));
         const int a2=static_cast<int>((trial>>8)|(trial%11==0?0x80000000u:trial%11==1?0x7fffff00u:0));
         ITEM_ATTRIBUTE beforeRow{};
@@ -122,22 +128,21 @@ def harness(revision=None):
     structs=read_source("src/structs.h",revision)
     for name in ("MAX_SPECIAL_OPTION","MAX_CLASS","MAX_RESISTANCE"):
         prefix+="\n"+re.search(rf"^#define\s+{name}\s+[^\n]+",structs,re.M).group()+"\n"
-    item_header = '#include "Item/ItemTypes.h"' in structs
+    item_header = '#include "game/item/ItemTypes.h"' in structs
     if item_header:
-        prefix += read_source("src/Item/ItemTypes.h", revision)
+        prefix += read_source("src/game/item/ItemTypes.h", revision)
     for name in (("ITEM_ATTRIBUTE",) if item_header else ("ITEM","ITEM_ATTRIBUTE")):
         prefix+=re.search(rf"struct {name}\b.*?\n\}};",structs,re.S).group()
     prefix+="\nstatic_assert(sizeof(ITEM)==68 && sizeof(ITEM_ATTRIBUTE)==64);\n"
-    prefix+="\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;",read_source("src/Item/ItemDefines.h",revision),re.M))
-    catalog=read_source("src/Item/ContentCatalog.h",revision)
+    prefix+="\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;",read_source("src/game/item/ItemDefines.h",revision),re.M))
+    catalog=read_source("src/assets/data/ContentCatalog.h",revision)
     prefix+=re.search(r"struct CatalogWing\s*\{.*?\n\};",catalog,re.S).group()
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
-    for name in ("DAT_07d78068","DAT_07cf1ff4"):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-        prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
-    prefix+="\n"+re.search(r"^#define\s+CharacterAttribute\s+[^\n]+",header,re.M).group()+"\n"
+    for name in ("DAT_07d78068","CharacterAttribute"):
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+        prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
     prefix+=SERVICES+function(catalog,"ItemBehaviorType")
-    convert=function(read_source("src/Item/Item_LegacyLinker.cpp",revision),"ItemConvert")
+    convert=function(read_source("src/game/item/Item_LegacyLinker.cpp",revision),"ItemConvert")
     arg="item" if "ITEM* ip" in convert.split("{",1)[0] else "static_cast<int>(reinterpret_cast<std::uintptr_t>(item))"
     return prefix+convert+MAIN.replace("ARG",arg)
 

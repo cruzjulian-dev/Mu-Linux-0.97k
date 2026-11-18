@@ -13,6 +13,12 @@ import tempfile
 from QuestListPointer import harness as list_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 BYTE* activeQuest;
 BYTE expectedIndex;
@@ -78,13 +84,13 @@ def harness(revision=None):
     fake = function(prefix, "CSQuest__ShowQuestNpcWindow")
     prefix = prefix.replace(fake, "void __fastcall CSQuest__ShowQuestNpcWindow(void*,int,int);")
     header, definitions = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
-    for name in ("GoldenArcherOpenType", "DAT_07eaa117", "DAT_07eaa116"):
-        prefix += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
-        prefix += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M).group()
-    for name in ("_g_bEventChipDialogEnable", "InventoryOpened", "CharacterOpened"):
+    for name in ("GoldenArcherOpenType", "InventoryOpened", "CharacterOpened"):
+        prefix += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
+        prefix += optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M))
+    for name in ("_g_bEventChipDialogEnable",):
         prefix += "\n" + re.search(rf"^#define\s+{name}\s+[^\n]+", header, re.M).group() + "\n"
     prefix += SERVICES
-    prefix += function(read_source("src/Core/Runtime_Medium.cpp", revision), "CSQuest__ShowQuestNpcWindow")
+    prefix += function(read_source("src/app/core/Runtime_Medium.cpp", revision), "CSQuest__ShowQuestNpcWindow")
     return prefix + MAIN
 
 

@@ -13,6 +13,12 @@ from SceneObjectPointer import build_and_run, function, read_source
 from AnimationBonesPointer import layouts
 from ObjectLayoutContract import record
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 #include <cmath>
 #include <initializer_list>
@@ -97,16 +103,16 @@ int main() {
 
 
 def harness(revision=None):
-    source=read_source('src/Render/BMD_SetupRender.cpp',revision)
+    source=read_source('src/render/BMD_SetupRender.cpp',revision)
     code=function(source,'BMD_SetupRenderByType')
-    types=layouts()+'\nusing vec34_t=float[3][4];\n#pragma pack(push,1)\n'+record(read_source('src/Entity/EntityTypes.h'),'OBJECT')+'\n#pragma pack(pop)\nOBJECT* AsObject(uintptr_t p){return reinterpret_cast<OBJECT*>(p);}\nconstexpr unsigned ModelBytes=sizeof(BMD)+36,EntityBytes=sizeof(OBJECT)+36;\n'
+    types=layouts()+'\nusing vec34_t=float[3][4];\n#pragma pack(push,1)\n'+record(read_source('src/game/entity/EntityTypes.h'),'OBJECT')+'\n#pragma pack(pop)\nOBJECT* AsObject(uintptr_t p){return reinterpret_cast<OBJECT*>(p);}\nconstexpr unsigned ModelBytes=sizeof(BMD)+36,EntityBytes=sizeof(OBJECT)+36;\n'
     types=types.replace('constexpr unsigned ModelBytes=sizeof(void*)==4?224:256;','')
     services=SERVICES.replace('Hash(activeModel+72,12)','Hash(activeModel+offsetof(BMD,BodyLight),12)')
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0]+types+services
     header,definitions=read_source('src/globals.h',revision),read_source('src/globals.cpp',revision)
     for name in sorted(set(re.findall(r'_DAT_[0-9a-f]+',code))):
-        prefix+=re.search(rf'extern [^;\n]*\b{name}\s*;',header).group()
-        prefix+=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M).group()
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}\s*;',header))
+        prefix+=optional_definition(re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M))
     arg='reinterpret_cast<uintptr_t>(activeEntity)'
     if 'uintptr_t param_2' not in code:arg='static_cast<int>(reinterpret_cast<uintptr_t>(activeEntity))'
     main=MAIN.replace('ENTITY_ARG',arg);main=re.sub(r'\b224\b','ModelBytes',main);main=re.sub(r'\b480\b','EntityBytes',main)

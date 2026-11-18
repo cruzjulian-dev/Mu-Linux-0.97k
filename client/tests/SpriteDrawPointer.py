@@ -12,12 +12,21 @@ import tempfile
 
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
+from legacy_fields import lower_names
+
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
 
 SERVICES = r'''
 #include <algorithm>
 struct OBJECT;
 char* spritePool; char* g_BitmapsRaw; constexpr int kSpritePoolSize=1002;
 #define DAT_07c85890 (*reinterpret_cast<char(*)[1002*444]>(spritePool))
+// Nombre nuevo del pool (T9f) sobre el mismo buffer; el viejo queda para las revisiones anteriores.
+#define Sprites (reinterpret_cast<OBJECT*>(spritePool))
 bool blocked; int settingsCalls;
 struct Settings { bool GetAntilag(int id) { Require(id==ANTILAG_STATIC_EFFECTS); ++settingsCalls; return blocked; } } gUserSettings;
 struct Event { int kind,type; std::uint32_t width,height,rotation; std::vector<BYTE> data; };
@@ -122,20 +131,21 @@ int main() {
 def harness(revision=None):
     prefix=PREAMBLE.split("char DAT_00559bb4",1)[0].replace("0x10000","0x100000")
     prefix+='\n#define Require(...) do { if(!(__VA_ARGS__)) { std::fprintf(stderr,"sprite assertion line %d\\n",__LINE__); std::exit(1); } } while(false)\n'
-    prefix+=re.search(r"enum eAntilag\s*\{.*?\};",read_source("src/Config/UserSettings.h",revision),re.S).group()+SERVICES
-    entities=read_source("src/Entity/EntityTypes.h",revision)
+    prefix+=re.search(r"enum eAntilag\s*\{.*?\};",read_source("src/app/config/UserSettings.h",revision),re.S).group()+SERVICES
+    entities=read_source("src/game/entity/EntityTypes.h",revision)
     helpers=re.findall(r"^inline (?:const )?OBJECT\* AsObject[^\n]+",entities,re.M)
     if len(helpers)!=3: raise ValueError("Se esperaban tres overloads de AsObject")
     prefix+="\n".join(helpers)
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
     for name in ("_DAT_005524f4","_DAT_005526e4","_DAT_0055256c"):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-        prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+        prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
     for name in ("DAT_083a7cc0","DAT_083a7cc4"):
         prefix+="\n"+re.search(rf"^#define\s+{name}\s+[^\n]+",header,re.M).group()+"\n"
-    source=read_source("src/Sound/Sound_Queue.cpp",revision)
-    draw=function(source,"Render_DrawSprite"); prefix+=draw+function(source,"Render_DrawSpritePool")
-    prefix+=function(read_source("src/Render/Particle_Legacy.cpp",revision),"Character_UpdateAll")
+    source=read_source("src/audio/Sound_Queue.cpp",revision)
+    # Memoria en layout x86 y OBJECT sin definir: los accesos por nombre pasan a offset crudo.
+    draw=function(source,"Render_DrawSprite"); prefix+=lower_names(draw+function(source,"Render_DrawSpritePool"))
+    prefix+=lower_names(function(read_source("src/render/Particle_Legacy.cpp",revision),"Character_UpdateAll"))
     arg="reinterpret_cast<const OBJECT*>(object)" if "const OBJECT*" in draw.split("{",1)[0] else "static_cast<int>(reinterpret_cast<std::uintptr_t>(object))"
     return prefix+MAIN.replace("ARG",arg)
 

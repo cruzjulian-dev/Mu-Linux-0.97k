@@ -1,11 +1,12 @@
 #include "stdafx.h"
 #include "SkillManager.h"
-#include "Math.h"
+#include "GameMath.h"
 #include "Attack.h"
 #include "EffectManager.h"
 #include "Fruit.h"
 #include "Guild.h"
 #include "ItemManager.h"
+#include "Log.h"
 #include "Map.h"
 #include "ReadScript.h"
 #include "Message.h"
@@ -896,6 +897,26 @@ bool CSkillManager::RunningSkill(int aIndex, int bIndex, CSkill* lpSkill, BYTE x
 			return this->SkillSummon(aIndex, bIndex, lpSkill);
 		}
 
+		case SKILL_SUMMON8:
+		{
+			return this->SkillSummon(aIndex, bIndex, lpSkill);
+		}
+
+		case SKILL_SUMMON9:
+		{
+			return this->SkillSummon(aIndex, bIndex, lpSkill);
+		}
+
+		case SKILL_SUMMON10:
+		{
+			return this->SkillSummon(aIndex, bIndex, lpSkill);
+		}
+
+		case SKILL_SUMMON11:
+		{
+			return this->SkillSummon(aIndex, bIndex, lpSkill);
+		}
+
 		case SKILL_TWISTING_SLASH:
 		{
 			return this->SkillTwistingSlash(aIndex, bIndex, lpSkill);
@@ -1353,64 +1374,22 @@ bool CSkillManager::SkillSummon(int aIndex, int bIndex, CSkill* lpSkill)
 		return false;
 	}
 
-	int monster = 0;
+	// Mu-Linux: el monstruo sale de una tabla (orbe +0..+10 = skills 30..40).
+	const int monsters[] = {
+		gServerInfo.m_SummonMonster1, gServerInfo.m_SummonMonster2, gServerInfo.m_SummonMonster3,
+		gServerInfo.m_SummonMonster4, gServerInfo.m_SummonMonster5, gServerInfo.m_SummonMonster6,
+		gServerInfo.m_SummonMonster7, gServerInfo.m_SummonMonster8, gServerInfo.m_SummonMonster9,
+		gServerInfo.m_SummonMonster10, gServerInfo.m_SummonMonster11,
+	};
 
-	switch (lpSkill->m_index)
+	const int slot = lpSkill->m_index - SKILL_SUMMON1;
+
+	if (slot < 0 || slot >= (int)(sizeof(monsters) / sizeof(monsters[0])) || monsters[slot] <= 0)
 	{
-		case SKILL_SUMMON1:
-		{
-			monster = gServerInfo.m_SummonMonster1;
-
-			break;
-		}
-
-		case SKILL_SUMMON2:
-		{
-			monster = gServerInfo.m_SummonMonster2;
-
-			break;
-		}
-
-		case SKILL_SUMMON3:
-		{
-			monster = gServerInfo.m_SummonMonster3;
-
-			break;
-		}
-
-		case SKILL_SUMMON4:
-		{
-			monster = gServerInfo.m_SummonMonster4;
-
-			break;
-		}
-
-		case SKILL_SUMMON5:
-		{
-			monster = gServerInfo.m_SummonMonster5;
-
-			break;
-		}
-
-		case SKILL_SUMMON6:
-		{
-			monster = gServerInfo.m_SummonMonster6;
-
-			break;
-		}
-
-		case SKILL_SUMMON7:
-		{
-			monster = gServerInfo.m_SummonMonster7;
-
-			break;
-		}
-
-		default:
-		{
-			return false;
-		}
+		return false;
 	}
+
+	int monster = monsters[slot];
 
 	if (OBJECT_RANGE(lpObj->SummonIndex) != 0)
 	{
@@ -1461,6 +1440,52 @@ bool CSkillManager::SkillSummon(int aIndex, int bIndex, CSkill* lpSkill)
 	lpSummon->PathCount = 0;
 
 	lpSummon->MoveRange = 15;
+
+	// Mu-Linux: la invocación escala con la elfa.  En el original quedaba con
+	// los stats planos de Monster.txt y a nivel alto no servía.
+	// Rate = SummonConstA + Energy / SummonConstB + Level / SummonConstC
+	//      + Reset * SummonResetRate (%), con tope SummonMaxRate.  El término de
+	// resets compensa que el nivel vuelve a 1 al resetear.  Sube vida, daño, defensas y tasas de ataque y
+	// defensa en ese porcentaje.
+	int rate = gServerInfo.m_SummonConstA;
+
+	if (gServerInfo.m_SummonConstB > 0)
+	{
+		rate += lpObj->Energy / gServerInfo.m_SummonConstB;
+	}
+
+	if (gServerInfo.m_SummonConstC > 0)
+	{
+		rate += lpObj->Level / gServerInfo.m_SummonConstC;
+	}
+
+	if (gServerInfo.m_SummonResetRate > 0 && lpObj->Reset > 0)
+	{
+		rate += lpObj->Reset * gServerInfo.m_SummonResetRate;
+	}
+
+	rate = ((rate > gServerInfo.m_SummonMaxRate) ? gServerInfo.m_SummonMaxRate : rate);
+
+	if (rate > 0)
+	{
+		lpSummon->MaxLife += (lpSummon->MaxLife * rate) / 100;
+
+		lpSummon->Life = lpSummon->MaxLife;
+
+		lpSummon->ScriptMaxLife += (lpSummon->ScriptMaxLife * rate) / 100;
+
+		lpSummon->PhysiDamageMin += (lpSummon->PhysiDamageMin * rate) / 100;
+
+		lpSummon->PhysiDamageMax += (lpSummon->PhysiDamageMax * rate) / 100;
+
+		lpSummon->Defense += (lpSummon->Defense * rate) / 100;
+
+		lpSummon->MagicDefense += (lpSummon->MagicDefense * rate) / 100;
+
+		lpSummon->AttackSuccessRate += (lpSummon->AttackSuccessRate * rate) / 100;
+
+		lpSummon->DefenseSuccessRate += (lpSummon->DefenseSuccessRate * rate) / 100;
+	}
 
 	GCSummonLifeSend(lpSummon->SummonIndex, (int)lpSummon->Life, (int)lpSummon->MaxLife);
 
@@ -1780,12 +1805,14 @@ void CSkillManager::CGMultiSkillAttackRecv(PMSG_MULTI_SKILL_ATTACK_RECV* lpMsg, 
 	if (lpObj->Live == 0 || lpObj->Teleport != 0)
 	{
 		TRACE_REJECT(aIndex, 0x1D, -1, "skill %d: muerto o teletransportándose (Live=%d Teleport=%d)", lpMsg->skill, lpObj->Live, lpObj->Teleport);
+		GCRejectSend(aIndex, 0x1D, REJECT_SKILL_STATE);
 		return;
 	}
 
 	if (gMap[lpObj->Map].CheckAttr(lpObj->X, lpObj->Y, 1) != 0)
 	{
 		TRACE_REJECT(aIndex, 0x1D, -1, "skill %d: en zona segura (%d,%d)", lpMsg->skill, lpObj->X, lpObj->Y);
+		GCRejectSend(aIndex, 0x1D, REJECT_SKILL_SAFE_ZONE);
 		return;
 	}
 
@@ -1800,18 +1827,21 @@ void CSkillManager::CGMultiSkillAttackRecv(PMSG_MULTI_SKILL_ATTACK_RECV* lpMsg, 
 		if (lpSkill == 0)
 		{
 			TRACE_REJECT(aIndex, 0x1D, -1, "skill %d: el personaje no lo tiene", skill);
+			GCRejectSend(aIndex, 0x1D, REJECT_SKILL_NOT_LEARNED);
 			return;
 		}
 
 		if (!this->CheckSkillDelay(lpObj, lpSkill->m_index))
 		{
 			TRACE_REJECT(aIndex, 0x1D, -1, "skill %d: delay del skill sin cumplir", skill);
+			GCRejectSend(aIndex, 0x1D, REJECT_SKILL_DELAY);
 			return;
 		}
 
 		if (!this->CheckSkillRequireClass(lpObj, lpSkill->m_index))
 		{
 			TRACE_REJECT(aIndex, 0x1D, -1, "skill %d: la clase no puede usarlo", skill);
+			GCRejectSend(aIndex, 0x1D, REJECT_SKILL_CLASS);
 			return;
 		}
 	}
@@ -1831,9 +1861,26 @@ void CSkillManager::CGMultiSkillAttackRecv(PMSG_MULTI_SKILL_ATTACK_RECV* lpMsg, 
 		return;
 	}
 
+	// Estos skills resuelven sus blancos dentro del 0x1E (SkillTripleShot con
+	// el cono del ángulo, SkillTwistingSlash / SkillRagefulBlow /
+	// SkillDeathStab con el radio) y no pasan por MultiSkillAttack, así que
+	// nunca anotan MultiSkillIndex: el 0x1D que manda el cliente para ellos
+	// sobra y siempre se descartó.  Llega por el impacto del efecto: en Triple
+	// Shot, CreateArrows (0x474BD0) crea las flechas con Skill = 1,
+	// CreateEffect (0x460DC0 L313) lo copia a `o->Kind`, y con Kind != 0 el
+	// chequeo de colisión (sub_466440) reporta el blanco con un 0x1D.  Puede
+	// llegar incluso antes que el 0x1E (medido con Twisting Slash).  Se ignora
+	// sin avisarle al cliente, que si no muestra un rechazo por cada impacto.
+	if (lpObj->Type == OBJECT_USER && SkillResolvesTargetsInDurationAttack(lpSkill->m_skill))
+	{
+		TRACE_NOTE(aIndex, 0x1D, -1, "skill %d: 0x1D del impacto, los blancos se resuelven en el 0x1E", lpSkill->m_skill);
+		return;
+	}
+
 	if (lpObj->Type == OBJECT_USER && (lpObj->MultiSkillIndex == 0 || lpObj->MultiSkillIndex != lpSkill->m_index || (lpObj->MultiSkillCount++) >= 5))
 	{
 		TRACE_REJECT(aIndex, 0x1D, -1, "skill %d: sin 0x1E previo o fuera de cuenta (MultiSkillIndex=%d esperado=%d MultiSkillCount=%d)", lpSkill->m_skill, lpObj->MultiSkillIndex, lpSkill->m_index, lpObj->MultiSkillCount);
+		GCRejectSend(aIndex, 0x1D, REJECT_SKILL_SEQUENCE);
 		return;
 	}
 
@@ -1842,6 +1889,7 @@ void CSkillManager::CGMultiSkillAttackRecv(PMSG_MULTI_SKILL_ATTACK_RECV* lpMsg, 
 		if (lpObj->Inventory[0].IsItem() == 0 || lpObj->Inventory[1].IsItem() == 0)
 		{
 			TRACE_REJECT(aIndex, 0x1D, -1, "Triple Shot: faltan arco o flechas");
+			GCRejectSend(aIndex, 0x1D, REJECT_SKILL_NO_ARROWS);
 			return;
 		}
 
@@ -1903,6 +1951,24 @@ void CSkillManager::CGMultiSkillAttackRecv(PMSG_MULTI_SKILL_ATTACK_RECV* lpMsg, 
 		{
 			TRACE_REJECT(aIndex, 0x1D, -1, "skill %d: blanco %d fuera de radio (yo %d,%d / blanco %d,%d / radio %d)", lpSkill->m_skill, bIndex, lpObj->X, lpObj->Y, lpTarget->X, lpTarget->Y, this->GetSkillRadio(lpSkill->m_index));
 			continue;
+		}
+
+		// Fase 5: el blanco tiene que estar en el mismo mapa y sin una pared en
+		// medio. El cliente ya lo filtra antes de mandarlo (Attack hace CheckWall,
+		// 0x4830B0), pero la lista del 0x1D la arma el cliente y el server la
+		// tomaba tal cual: se podía pegar a través de paredes.
+		if (lpObj->Type == OBJECT_USER && gServerInfo.m_SkillLineCheck != 0 && (lpTarget->Map != lpObj->Map || gMap[lpObj->Map].CheckWall(lpObj->X, lpObj->Y, lpTarget->X, lpTarget->Y) == FALSE))
+		{
+			const char* mode = (gServerInfo.m_SkillLineCheck == 2) ? "" : " [observado]";
+
+			gLog.Output(LOG_HACK, "[%s][%s] Skill %d: blanco %d tapado por una pared (yo %d,%d / blanco %d,%d)%s", lpObj->Account, lpObj->Name, lpSkill->m_skill, bIndex, lpObj->X, lpObj->Y, lpTarget->X, lpTarget->Y, mode);
+
+			TRACE_REJECT(aIndex, 0x1D, -1, "skill %d: blanco %d sin linea de vision (yo %d,%d / blanco %d,%d)%s", lpSkill->m_skill, bIndex, lpObj->X, lpObj->Y, lpTarget->X, lpTarget->Y, mode);
+
+			if (gServerInfo.m_SkillLineCheck == 2)
+			{
+				continue;
+			}
 		}
 
 		if (type != 0 || lpSkill->m_skill == SKILL_FIRE_SLASH)
@@ -2028,12 +2094,14 @@ void CSkillManager::CGDurationSkillAttackRecv(PMSG_DURATION_SKILL_ATTACK_RECV* l
 		if (lpSkill == 0)
 		{
 			TRACE_REJECT(aIndex, 0x1E, -1, "skill %d: el personaje no lo tiene", skill);
+			GCRejectSend(aIndex, 0x1E, REJECT_SKILL_NOT_LEARNED);
 			return;
 		}
 
 		if (!this->CheckSkillDelay(lpObj, lpSkill->m_index))
 		{
 			TRACE_REJECT(aIndex, 0x1E, -1, "skill %d: delay del skill sin cumplir", skill);
+			GCRejectSend(aIndex, 0x1E, REJECT_SKILL_DELAY);
 			return;
 		}
 

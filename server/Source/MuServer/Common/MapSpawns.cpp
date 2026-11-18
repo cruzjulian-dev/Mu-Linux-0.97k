@@ -10,11 +10,14 @@
 #include <map>
 #include <optional>
 #include <sstream>
+#include <string>
 
 #define TOML_EXCEPTIONS 0
 #include "tomlplusplus/toml.hpp"
 
 namespace fs = std::filesystem;
+
+#include "Utf8Path.h"
 
 static const char* const kSectionNames[MAP_SPAWN_SECTIONS] = { "npc", "area", "spot", "invasion", "event" };
 
@@ -69,25 +72,30 @@ static int FolderMapNumber(const std::string& folder)
 	return std::atoi(folder.substr(0, dash).c_str());
 }
 
+int MapSpawns_FolderMap(const std::string& folder)
+{
+	return FolderMapNumber(folder);
+}
+
 // Carpetas de mapa con Spawns.toml, ordenadas por número. Falla si dos carpetas
 // dicen ser el mismo mapa.
 static bool ListMapFolders(const std::string& mapsDir, std::map<int, fs::path>& out, std::string& error)
 {
 	std::error_code ec;
 
-	if (!fs::is_directory(fs::u8path(mapsDir), ec))
+	if (!fs::is_directory(Utf8Path(mapsDir), ec))
 	{
 		return true;
 	}
 
-	for (const fs::directory_entry& entry : fs::directory_iterator(fs::u8path(mapsDir), ec))
+	for (const fs::directory_entry& entry : fs::directory_iterator(Utf8Path(mapsDir), ec))
 	{
 		if (!entry.is_directory(ec))
 		{
 			continue;
 		}
 
-		std::string folder = entry.path().filename().u8string();
+		std::string folder = PathToUtf8(entry.path().filename());
 
 		int map = FolderMapNumber(folder);
 
@@ -98,7 +106,7 @@ static bool ListMapFolders(const std::string& mapsDir, std::map<int, fs::path>& 
 
 		if (out.count(map) != 0)
 		{
-			error = "dos carpetas para el mapa " + std::to_string(map) + ": '" + out[map].filename().u8string() + "' y '" + folder + "'";
+			error = "dos carpetas para el mapa " + std::to_string(map) + ": '" + PathToUtf8(out[map].filename()) + "' y '" + folder + "'";
 
 			return false;
 		}
@@ -111,22 +119,22 @@ static bool ListMapFolders(const std::string& mapsDir, std::map<int, fs::path>& 
 
 static fs::path MapsDir(const std::string& dataDir)
 {
-	return fs::u8path(dataDir) / "Maps";
+	return Utf8Path(dataDir) / "Maps";
 }
 
 static fs::path InvasionsFile(const std::string& dataDir)
 {
-	return fs::u8path(dataDir) / "Events" / "Invasions" / "Spawns.toml";
+	return Utf8Path(dataDir) / "Events" / "Invasions" / "Spawns.toml";
 }
 
 std::string MapSpawns_InvasionsPath(const std::string& dataDir)
 {
-	return InvasionsFile(dataDir).u8string();
+	return PathToUtf8(InvasionsFile(dataDir));
 }
 
 std::string MapSpawns_MapsPath(const std::string& dataDir)
 {
-	return MapsDir(dataDir).u8string();
+	return PathToUtf8(MapsDir(dataDir));
 }
 
 bool MapSpawns_HasData(const std::string& dataDir)
@@ -139,7 +147,7 @@ bool MapSpawns_HasData(const std::string& dataDir)
 
 	// Con carpetas repetidas también hay datos: que MapSpawns_Load lo reporte en
 	// vez de caer en silencio al .txt.
-	return !ListMapFolders(MapsDir(dataDir).u8string(), folders, error) || !folders.empty() || fs::is_regular_file(InvasionsFile(dataDir), ec);
+	return !ListMapFolders(PathToUtf8(MapsDir(dataDir)), folders, error) || !folders.empty() || fs::is_regular_file(InvasionsFile(dataDir), ec);
 }
 
 // Lee un entero del entry; `required` hace que su ausencia sea error.
@@ -221,7 +229,7 @@ static const char* ListName(int section, bool invasions)
 // en cada entrada).
 static bool LoadSpawnFile(const fs::path& path, int map, std::vector<MapSpawnEntry> (&sections)[MAP_SPAWN_SECTIONS], std::string& error)
 {
-	std::string file = path.u8string();
+	std::string file = PathToUtf8(path);
 
 	bool invasions = (map < 0);
 
@@ -365,7 +373,7 @@ bool MapSpawns_Load(const std::string& dataDir, std::vector<MapSpawnEntry>& out,
 {
 	std::map<int, fs::path> folders;
 
-	if (!ListMapFolders(MapsDir(dataDir).u8string(), folders, error))
+	if (!ListMapFolders(PathToUtf8(MapsDir(dataDir)), folders, error))
 	{
 		return false;
 	}
@@ -432,7 +440,7 @@ static std::string Trim(const std::string& text)
 
 bool MapSpawns_LoadLegacy(const std::string& path, std::vector<MapSpawnEntry>& out, std::string& error)
 {
-	std::ifstream file(fs::u8path(path), std::ios::binary);
+	std::ifstream file(Utf8Path(path), std::ios::binary);
 
 	if (!file)
 	{
@@ -616,7 +624,7 @@ static void WriteEntry(std::ofstream& file, const MapSpawnEntry& e, bool withMap
 
 bool MapSpawns_WriteToml(const std::string& path, int map, const std::string& mapName, const std::vector<MapSpawnEntry>& entries, std::string& error)
 {
-	std::ofstream file(fs::u8path(path), std::ios::binary);
+	std::ofstream file(Utf8Path(path), std::ios::binary);
 
 	if (!file)
 	{
@@ -682,7 +690,7 @@ bool MapSpawns_WriteToml(const std::string& path, int map, const std::string& ma
 
 bool MapSpawns_WriteInvasions(const std::string& path, const std::vector<MapSpawnEntry>& entries, const std::map<int, std::string>& mapNames, std::string& error)
 {
-	std::ofstream file(fs::u8path(path), std::ios::binary);
+	std::ofstream file(Utf8Path(path), std::ios::binary);
 
 	if (!file)
 	{
@@ -695,8 +703,8 @@ bool MapSpawns_WriteInvasions(const std::string& path, const std::vector<MapSpaw
 		<< "#\n"
 		<< "# Cruzan mapas, así que no están en ninguna carpeta de Maps: cada entrada\n"
 		<< "# dice en qué `map` aparece. Las invasiones en sí (horarios, jefes,\n"
-		<< "# mensajes) siguen en Event/InvasionManager.dat; ahí, la tabla 2 elige por\n"
-		<< "# mapa y por `value` qué puntos de esta lista usa cada una.\n"
+		<< "# mensajes) están en Invasions.toml, en esta misma carpeta; ahí, cada\n"
+		<< "# grupo elige por mapa y por `value` qué puntos de esta lista usa.\n"
 		<< "#\n"
 		<< "# `count` monstruos repartidos en `box` = [x, y, tx, ty]. dir: 0 a 7, o -1\n"
 		<< "# (o sin dir) para una al azar. dis: distancia que se mueve el monstruo.\n"

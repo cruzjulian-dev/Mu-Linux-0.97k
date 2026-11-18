@@ -1,8 +1,18 @@
 #include "stdafx.h"
 #include "ContentCatalog.h"
+#include "ServerIdentity.h"
+#include "Gate.h"
+#include "MapManager.h"
+#include "Move.h"
+#include "ServerInfo.h"
+#include "SkillManager.h"
+#include "Sha256.h"
 #include "CustomPet.h"
 #include "CustomWing.h"
 #include "ItemManager.h"
+#include "ItemStack.h"
+#include "ItemValue.h"
+#include "Log.h"
 #include "MonsterManager.h"
 #include "ReadScript.h"
 #include "TextName.h"
@@ -26,6 +36,12 @@ static_assert(sizeof(PMSG_CATALOG_END_SEND) == 12, "catalog end");
 static_assert(sizeof(CATALOG_EFFECT) == 132, "catalog effect");
 static_assert(sizeof(CATALOG_TOOLTIP) == 64, "catalog tooltip");
 static_assert(sizeof(CATALOG_TEXT) == 68, "catalog text");
+static_assert(sizeof(CATALOG_GATE) == 16, "catalog gate");
+static_assert(sizeof(CATALOG_SKILL) == 8, "catalog skill");
+static_assert(sizeof(CATALOG_MAP_MUSIC) == 32, "catalog map music");
+static_assert(sizeof(CATALOG_CACHE_ENTRY) == 12, "catalog cache entry");
+static_assert(sizeof(PMSG_CATALOG_SYNC_SEND) == 8 + 12 * CATALOG_CACHE_MAX, "catalog sync");
+static_assert(sizeof(PMSG_CATALOG_SYNC_SEND) <= 255, "catalog sync entra en un C1");
 
 bool IsSafeModelPath(const char* path);
 
@@ -104,8 +120,6 @@ CContentCatalog::CContentCatalog()
 void CContentCatalog::LoadLegacyItems(const char* folder)
 {
 	this->m_ItemPose.clear();
-
-	this->m_MapFog.clear();
 
 	this->m_Built = false;
 
@@ -304,6 +318,17 @@ void CContentCatalog::LoadLegacyItems(const char* folder)
 
 		delete lpReadScript;
 	}
+
+	this->LoadMapFog(folder);
+}
+
+void CContentCatalog::LoadMapFog(const char* folder)
+{
+	this->m_MapFog.clear();
+
+	this->m_Built = false;
+
+	CReadScript* lpReadScript;
 
 	// MapFog: Mapa DiaR DiaG DiaB NocheR NocheG NocheB.
 	if ((lpReadScript = OpenLegacy(folder, "MapFog.txt")) != 0)
@@ -682,19 +707,211 @@ void CContentCatalog::Build()
 		monsters.push_back(entry);
 	}
 
+	this->m_Sections.clear();
+
+	size_t sectionBegin = this->m_Packets.size();
+
 	this->BuildSection(0xE7, items.empty() ? 0 : (const BYTE*)&items[0], sizeof(CATALOG_ITEM), (int)items.size(), this->m_Packets);
+
+	this->MarkSection(0xE7, sectionBegin);
+
+	sectionBegin = this->m_Packets.size();
 
 	this->BuildSection(0xE8, monsters.empty() ? 0 : (const BYTE*)&monsters[0], sizeof(CATALOG_MONSTER), (int)monsters.size(), this->m_Packets);
 
+	this->MarkSection(0xE8, sectionBegin);
+
+	sectionBegin = this->m_Packets.size();
+
 	this->BuildSection(0xE9, this->m_MapFog.empty() ? 0 : (const BYTE*)&this->m_MapFog[0], sizeof(CATALOG_MAP_FOG), (int)this->m_MapFog.size(), this->m_Packets);
+
+	this->MarkSection(0xE9, sectionBegin);
+
+	sectionBegin = this->m_Packets.size();
 
 	this->BuildSection(0xEC, this->m_Effects.empty() ? 0 : (const BYTE*)&this->m_Effects[0], sizeof(CATALOG_EFFECT), (int)this->m_Effects.size(), this->m_Packets);
 
+	this->MarkSection(0xEC, sectionBegin);
+
+	sectionBegin = this->m_Packets.size();
+
 	this->BuildSection(0xEF, this->m_Tooltips.empty() ? 0 : (const BYTE*)&this->m_Tooltips[0], sizeof(CATALOG_TOOLTIP), (int)this->m_Tooltips.size(), this->m_Packets);
+
+	this->MarkSection(0xEF, sectionBegin);
+
+	sectionBegin = this->m_Packets.size();
 
 	const std::vector<CATALOG_PET>& pets = gCustomPet.GetCatalog();
 
 	this->BuildSection(0xEE, pets.empty() ? 0 : (const BYTE*)&pets[0], sizeof(CATALOG_PET), (int)pets.size(), this->m_Packets);
+
+	this->MarkSection(0xEE, sectionBegin);
+
+	std::vector<CATALOG_GATE> gates;
+
+	for (const std::pair<const int, GATE_INFO>& it : gGate.GetAll())
+	{
+		const GATE_INFO& info = it.second;
+
+		CATALOG_GATE entry;
+
+		memset(&entry, 0, sizeof(entry));
+
+		entry.Index = (WORD)info.Index;
+
+		entry.Flag = (BYTE)info.Flag;
+
+		entry.Map = (BYTE)info.Map;
+
+		entry.X = (BYTE)info.X;
+
+		entry.Y = (BYTE)info.Y;
+
+		entry.TX = (BYTE)info.TX;
+
+		entry.TY = (BYTE)info.TY;
+
+		entry.Target = (WORD)info.TargetGate;
+
+		entry.Dir = (BYTE)info.Dir;
+
+		entry.MinLevel = (WORD)((info.MinLevel < 0) ? 0 : info.MinLevel);
+
+		gates.push_back(entry);
+	}
+
+	this->m_GatePackets.clear();
+
+	this->BuildSection(0xF3, gates.empty() ? 0 : (const BYTE*)&gates[0], sizeof(CATALOG_GATE), (int)gates.size(), this->m_GatePackets);
+
+	sectionBegin = this->m_Packets.size();
+
+	this->m_Packets.insert(this->m_Packets.end(), this->m_GatePackets.begin(), this->m_GatePackets.end());
+
+	this->MarkSection(0xF3, sectionBegin);
+
+	std::vector<CATALOG_SKILL> skills;
+
+	for (const std::pair<const int, SKILL_INFO>& it : gSkillManager.GetAll())
+	{
+		const SKILL_INFO& info = it.second;
+
+		CATALOG_SKILL entry;
+
+		memset(&entry, 0, sizeof(entry));
+
+		entry.Index = (WORD)info.Index;
+
+		entry.Mana = (WORD)((info.Mana < 0) ? 0 : info.Mana);
+
+		entry.BP = (WORD)((info.BP < 0) ? 0 : info.BP);
+
+		entry.Range = (BYTE)((info.Range < 0) ? 0 : ((info.Range > 255) ? 255 : info.Range));
+
+		skills.push_back(entry);
+	}
+
+	this->m_SkillPackets.clear();
+
+	this->BuildSection(0xF4, skills.empty() ? 0 : (const BYTE*)&skills[0], sizeof(CATALOG_SKILL), (int)skills.size(), this->m_SkillPackets);
+
+	sectionBegin = this->m_Packets.size();
+
+	this->m_Packets.insert(this->m_Packets.end(), this->m_SkillPackets.begin(), this->m_SkillPackets.end());
+
+	this->MarkSection(0xF4, sectionBegin);
+
+	std::vector<CATALOG_MAP_MUSIC> music;
+
+	for (const std::pair<const int, MAP_MANAGER_INFO>& it : gMapManager.m_MapManagerInfo)
+	{
+		if (it.second.Music[0] == 0 || it.first < 0 || it.first > 255)
+		{
+			continue;
+		}
+
+		CATALOG_MAP_MUSIC entry;
+
+		memset(&entry, 0, sizeof(entry));
+
+		entry.Map = (BYTE)it.first;
+
+		memcpy(entry.Music, it.second.Music, sizeof(entry.Music));
+
+		entry.Music[sizeof(entry.Music) - 1] = 0;
+
+		music.push_back(entry);
+	}
+
+	this->m_MapMusicPackets.clear();
+
+	this->BuildSection(0xF7, music.empty() ? 0 : (const BYTE*)&music[0], sizeof(CATALOG_MAP_MUSIC), (int)music.size(), this->m_MapMusicPackets);
+
+	sectionBegin = this->m_Packets.size();
+
+	this->m_Packets.insert(this->m_Packets.end(), this->m_MapMusicPackets.begin(), this->m_MapMusicPackets.end());
+
+	this->MarkSection(0xF7, sectionBegin);
+
+	// Apilado (F3:F8) y precios fijos (F3:F9).  Antes eran las listas F3:E3 y
+	// F3:E4 del DLL, que no entraban en caché y cortaban en 255 filas.
+	std::vector<ITEM_STACK> stacks;
+
+	gItemStack.BuildCatalog(stacks);
+
+	sectionBegin = this->m_Packets.size();
+
+	this->BuildSection(0xF8, stacks.empty() ? 0 : (const BYTE*)&stacks[0], sizeof(ITEM_STACK), (int)stacks.size(), this->m_Packets);
+
+	this->MarkSection(0xF8, sectionBegin);
+
+	const std::vector<ITEM_VALUE_INFO>& values = gItemValue.GetCatalog();
+
+	sectionBegin = this->m_Packets.size();
+
+	this->BuildSection(0xF9, values.empty() ? 0 : (const BYTE*)&values[0], sizeof(ITEM_VALUE_INFO), (int)values.size(), this->m_Packets);
+
+	this->MarkSection(0xF9, sectionBegin);
+
+	// Lista del menú M (F3:F5), antes F3:E5 por personaje.
+	std::vector<CATALOG_MOVE> moves;
+
+	for (const std::pair<const int, MOVE_INFO>& it : gMove.GetList())
+	{
+		CATALOG_MOVE entry;
+
+		memset(&entry, 0, sizeof(entry));
+
+		entry.Map = (BYTE)gGate.GetGateMap(it.second.Gate);
+
+		entry.Flags = (gServerInfo.m_PKLimitFree != 0) ? CATALOG_MOVE_PK_FREE : 0;
+
+		TextField::Copy(entry.Name, it.second.Name);
+
+		entry.Money = (DWORD)it.second.Money;
+
+		entry.MinLevel = (short)it.second.MinLevel;
+
+		entry.MaxLevel = (short)it.second.MaxLevel;
+
+		entry.MinReset = (short)it.second.MinReset;
+
+		entry.MaxReset = (short)it.second.MaxReset;
+
+		entry.AccountLevel = (short)it.second.AccountLevel;
+
+		moves.push_back(entry);
+	}
+
+	this->m_MoveListPackets.clear();
+
+	this->BuildSection(0xF5, moves.empty() ? 0 : (const BYTE*)&moves[0], sizeof(CATALOG_MOVE), (int)moves.size(), this->m_MoveListPackets);
+
+	sectionBegin = this->m_Packets.size();
+
+	this->m_Packets.insert(this->m_Packets.end(), this->m_MoveListPackets.begin(), this->m_MoveListPackets.end());
+
+	this->MarkSection(0xF5, sectionBegin);
 
 	// Los textos dependen del idioma de cada cliente: van aparte y no entran
 	// en el hash, que identifica el contenido compartido.
@@ -735,7 +952,128 @@ void CContentCatalog::Build()
 
 	this->m_Built = true;
 
-	LogAdd(LOG_BLUE, "[ContentCatalog] %d items, %d monstruos, %d fog, %d efectos, %d paquetes", (int)items.size(), (int)monsters.size(), (int)this->m_MapFog.size(), (int)this->m_Effects.size(), (int)this->m_Packets.size());
+	LogAdd(LOG_BLUE, "[ContentCatalog] %d items, %d monstruos, %d fog, %d efectos, %d gates, %d skills, %d paquetes", (int)items.size(), (int)monsters.size(), (int)this->m_MapFog.size(), (int)this->m_Effects.size(), (int)gates.size(), (int)skills.size(), (int)this->m_Packets.size());
+}
+
+void CContentCatalog::MarkSection(BYTE subh, size_t begin)
+{
+	SectionRange range;
+
+	range.subh = subh;
+
+	range.begin = begin;
+
+	range.end = this->m_Packets.size();
+
+	// El hash cubre sólo los registros, que es lo que el cliente guarda en su
+	// caché: así puede recalcularlo al leerla.
+	std::vector<BYTE> records;
+
+	WORD recordSize = 0;
+
+	for (size_t n = begin; n < range.end; n++)
+	{
+		const std::vector<BYTE>& packet = this->m_Packets[n];
+
+		if (packet.size() < sizeof(PMSG_CATALOG_HEAD))
+		{
+			continue;
+		}
+
+		PMSG_CATALOG_HEAD head;
+
+		memcpy(&head, &packet[0], sizeof(head));
+
+		recordSize = head.recordSize;
+
+		records.insert(records.end(), packet.begin() + sizeof(PMSG_CATALOG_HEAD), packet.end());
+	}
+
+	CatalogSectionHash(recordSize, records.empty() ? 0 : &records[0], records.size(), range.hash);
+
+	this->m_Sections.push_back(range);
+}
+
+void CContentCatalog::SetClientCache(int aIndex, const PMSG_CATALOG_CACHE_RECV* lpMsg)
+{
+	LPOBJ lpObj = &gObj[aIndex];
+
+	lpObj->CatalogCacheCount = 0;
+
+	const int size = lpMsg->header.size;
+
+	int count = lpMsg->count;
+
+	if (count > CATALOG_CACHE_MAX)
+	{
+		count = CATALOG_CACHE_MAX;
+	}
+
+	if (size < (int)(8 + count * sizeof(CATALOG_CACHE_ENTRY)))
+	{
+		count = (size < 8) ? 0 : (int)((size - 8) / sizeof(CATALOG_CACHE_ENTRY));
+	}
+
+	for (int n = 0; n < count; n++)
+	{
+		lpObj->CatalogCacheSub[n] = lpMsg->entry[n].subh;
+
+		memcpy(lpObj->CatalogCacheHash[n], lpMsg->entry[n].hash, sizeof(lpObj->CatalogCacheHash[n]));
+	}
+
+	lpObj->CatalogCacheCount = (BYTE)count;
+}
+
+void CContentCatalog::SendGates(int aIndex)
+{
+	if (!this->m_Built)
+	{
+		this->Build();
+	}
+
+	for (const std::vector<BYTE>& packet : this->m_GatePackets)
+	{
+		DataSend(aIndex, (BYTE*)&packet[0], (DWORD)packet.size());
+	}
+}
+
+void CContentCatalog::SendMapMusic(int aIndex)
+{
+	if (!this->m_Built)
+	{
+		this->Build();
+	}
+
+	for (const std::vector<BYTE>& packet : this->m_MapMusicPackets)
+	{
+		DataSend(aIndex, (BYTE*)&packet[0], (DWORD)packet.size());
+	}
+}
+
+void CContentCatalog::SendMoveList(int aIndex)
+{
+	if (!this->m_Built)
+	{
+		this->Build();
+	}
+
+	for (const std::vector<BYTE>& packet : this->m_MoveListPackets)
+	{
+		DataSend(aIndex, (BYTE*)&packet[0], (DWORD)packet.size());
+	}
+}
+
+void CContentCatalog::SendSkills(int aIndex)
+{
+	if (!this->m_Built)
+	{
+		this->Build();
+	}
+
+	for (const std::vector<BYTE>& packet : this->m_SkillPackets)
+	{
+		DataSend(aIndex, (BYTE*)&packet[0], (DWORD)packet.size());
+	}
 }
 
 void CContentCatalog::Send(int aIndex)
@@ -745,13 +1083,111 @@ void CContentCatalog::Send(int aIndex)
 		this->Build();
 	}
 
+	LPOBJ lpObj = &gObj[aIndex];
+
+	// Lista de secciones con su hash: las que el cliente ya tiene con el mismo
+	// hash las toma de su caché y no se mandan.
+	PMSG_CATALOG_SYNC_SEND sync;
+
+	memset(&sync, 0, sizeof(sync));
+
+	std::vector<bool> cached(this->m_Sections.size(), false);
+
+	int cachedCount = 0;
+
+	for (size_t s = 0; s < this->m_Sections.size() && s < CATALOG_CACHE_MAX; s++)
+	{
+		CATALOG_CACHE_ENTRY& entry = sync.entry[sync.count++];
+
+		entry.subh = this->m_Sections[s].subh;
+
+		memcpy(entry.hash, this->m_Sections[s].hash, sizeof(entry.hash));
+
+		for (int n = 0; n < lpObj->CatalogCacheCount; n++)
+		{
+			if (lpObj->CatalogCacheSub[n] == entry.subh && memcmp(lpObj->CatalogCacheHash[n], entry.hash, sizeof(entry.hash)) == 0)
+			{
+				entry.cached = 1;
+
+				cached[s] = true;
+
+				cachedCount++;
+
+				break;
+			}
+		}
+	}
+
+	lpObj->CatalogCacheCount = 0;
+
+	const BYTE syncSize = (BYTE)(8 + sync.count * sizeof(CATALOG_CACHE_ENTRY));
+
+	sync.header.set(0xF3, 0xF6, syncSize);
+
+	// Firma del manifiesto (C3), antes del F3:F6 que el cliente verifica con ella.
+	if (gServerIdentity.IsLoaded())
+	{
+		BYTE message[sizeof(CATALOG_SIGNATURE_CONTEXT) - 1 + 1 + CATALOG_CACHE_MAX * 9];
+
+		size_t length = sizeof(CATALOG_SIGNATURE_CONTEXT) - 1;
+
+		memcpy(message, CATALOG_SIGNATURE_CONTEXT, length);
+
+		message[length++] = sync.count;
+
+		for (int n = 0; n < sync.count; n++)
+		{
+			message[length++] = sync.entry[n].subh;
+
+			memcpy(&message[length], sync.entry[n].hash, sizeof(sync.entry[n].hash));
+
+			length += sizeof(sync.entry[n].hash);
+		}
+
+		PMSG_CATALOG_SIGNATURE_SEND signature;
+
+		memset(&signature, 0, sizeof(signature));
+
+		signature.header.set(0xF3, 0xFC, sizeof(signature));
+
+		memcpy(signature.publicKey, gServerIdentity.PublicKey(), sizeof(signature.publicKey));
+
+		gServerIdentity.Sign(signature.signature, message, length);
+
+		if (gServerIdentity.HasRotation())
+		{
+			signature.flags |= CATALOG_SIGNATURE_HAS_ROTATION;
+
+			memcpy(signature.previousKey, gServerIdentity.PreviousPublicKey(), sizeof(signature.previousKey));
+
+			memcpy(signature.rotationSignature, gServerIdentity.RotationSignature(), sizeof(signature.rotationSignature));
+		}
+
+		DataSend(aIndex, (BYTE*)&signature, sizeof(signature));
+	}
+
+	DataSend(aIndex, (BYTE*)&sync, syncSize);
+
+	for (size_t s = 0; s < this->m_Sections.size(); s++)
+	{
+		if (cached[s])
+		{
+			continue;
+		}
+
+		for (size_t n = this->m_Sections[s].begin; n < this->m_Sections[s].end; n++)
+		{
+			DataSend(aIndex, &this->m_Packets[n][0], (DWORD)this->m_Packets[n].size());
+		}
+	}
+
+	if (cachedCount > 0)
+	{
+		gLog.Output(LOG_CONNECT, "[ContentCatalog][%d] %d de %d secciones desde la caché del cliente", aIndex, cachedCount, (int)this->m_Sections.size());
+	}
+
 	// El fin (F3:EA) va último: el cliente publica todo lo recibido al verlo.
 	const size_t last = this->m_Packets.size() - 1;
-
-	for (size_t n = 0; n < last; n++)
-	{
-		DataSend(aIndex, &this->m_Packets[n][0], (DWORD)this->m_Packets[n].size());
-	}
 
 	const int lang = gObj[aIndex].Lang;
 
@@ -1170,6 +1606,193 @@ namespace
 	}
 }
 
+namespace
+{
+	bool ReadPose(const JsonValue& inventory, ITEM_POSE_INFO& pose, std::string& error)
+	{
+		float position[2] = { 0.0f, 0.0f };
+
+		float rotation[3] = { 0.0f, 0.0f, 0.0f };
+
+		error.clear();
+
+		if (!inventory.IsObject() || !ReadVector(inventory, "position", position, 2, error) || !ReadVector(inventory, "rotation", rotation, 3, error))
+		{
+			if (error.empty())
+			{
+				error = "tiene que ser un objeto";
+			}
+
+			return false;
+		}
+
+		pose.Valid = true;
+
+		pose.PositionX = position[0];
+
+		pose.PositionY = position[1];
+
+		pose.RotationX = rotation[0];
+
+		pose.RotationY = rotation[1];
+
+		pose.RotationZ = rotation[2];
+
+		pose.Scale = (float)inventory.GetNumber("scale", 0.0);
+
+		return true;
+	}
+
+	// El catálogo corta la carpeta a 40 y el nombre a 28 bytes (E7): un texto
+	// más largo llegaba truncado al cliente sin aviso.
+	bool CopyModelPath(const ItemExtraDef& d, char* folder, size_t folderSize, char* model, size_t modelSize, std::string& error)
+	{
+		if (d.ModelFolder.size() >= 40 || d.ModelName.size() >= 28)
+		{
+			error = "'model': la carpeta tiene que tener menos de 40 caracteres y el nombre menos de 28";
+
+			return false;
+		}
+
+		if (!IsSafeModelPath(d.ModelFolder.c_str()) || !IsSafeModelPath(d.ModelName.c_str()))
+		{
+			error = "'model': ruta no válida (sólo letras, números, '/', '_', '-', '.' y espacios, sin '..')";
+
+			return false;
+		}
+
+		snprintf(folder, folderSize, "%s", d.ModelFolder.c_str());
+
+		snprintf(model, modelSize, "%s", d.ModelName.c_str());
+
+		return true;
+	}
+}
+
+void CContentCatalog::ApplyItemExtras(const std::vector<ItemExtraDef>& items)
+{
+	this->m_ItemPose.clear();
+
+	this->m_Effects.clear();
+
+	this->m_Tooltips.clear();
+
+	this->Invalidate();
+
+	// Igual que con CustomWing.txt: un ala custom sin Behavior se comporta como
+	// un ala de segunda (12,3).
+	for (int n = 0; n < MAX_CUSTOM_WING; n++)
+	{
+		CUSTOM_WING_INFO* wing = gCustomWing.GetInfo(n);
+
+		ITEM_INFO* lpInfo = (wing != 0) ? gItemManager.GetInfoPtr(wing->ItemIndex) : 0;
+
+		if (lpInfo != 0 && lpInfo->Behavior < 0)
+		{
+			lpInfo->Behavior = GET_ITEM(12, 3);
+		}
+	}
+
+	int applied = 0;
+
+	for (const ItemExtraDef& d : items)
+	{
+		const int item = GET_ITEM(d.Section, d.Index);
+
+		ITEM_INFO* lpInfo = gItemManager.GetInfoPtr(item);
+
+		if (lpInfo == 0)
+		{
+			// Sólo apilado o precio de un item que no está en Item.txt no hace
+			// daño; el resto no tiene dónde aplicarse.
+			LogAdd(LOG_RED, "[ContentCatalog] %s: el item %d,%d no existe en Item.txt", d.Source.c_str(), d.Section, d.Index);
+
+			continue;
+		}
+
+		std::string error;
+
+		std::vector<CATALOG_EFFECT> effects;
+
+		std::vector<CATALOG_TOOLTIP> tooltip;
+
+		ITEM_POSE_INFO pose = {};
+
+		char folder[sizeof(lpInfo->ModelFolder)] = {};
+
+		char model[sizeof(lpInfo->ModelName)] = {};
+
+		bool valid = d.ModelName.empty() || CopyModelPath(d, folder, sizeof(folder), model, sizeof(model), error);
+
+		for (size_t n = 0; valid && d.Effects.IsArray() && n < d.Effects.items.size(); n++)
+		{
+			CATALOG_EFFECT effect;
+
+			valid = ReadEffect(item, d.Effects.items[n], effect, error);
+
+			if (!valid)
+			{
+				error = "efecto " + std::to_string(n) + ": " + error;
+			}
+
+			effects.push_back(effect);
+		}
+
+		if (valid && d.Tooltip.IsArray() && !ReadTooltip(item, d.Tooltip, tooltip, error))
+		{
+			error = "'tooltip': " + error;
+
+			valid = false;
+		}
+
+		if (valid && d.Inventory.IsObject() && !ReadPose(d.Inventory, pose, error))
+		{
+			error = "'inventory': " + error;
+
+			valid = false;
+		}
+
+		// Un item con errores no aplica nada: mejor sin efecto que a medias.
+		if (!valid)
+		{
+			LogAdd(LOG_RED, "[ContentCatalog] %s: %s", d.Source.c_str(), error.c_str());
+
+			continue;
+		}
+
+		// La columna de Item.txt manda, como con los txt del Encoder.
+		if (!d.ModelName.empty() && lpInfo->ModelName[0] == 0)
+		{
+			memcpy(lpInfo->ModelFolder, folder, sizeof(folder));
+
+			memcpy(lpInfo->ModelName, model, sizeof(model));
+		}
+
+		if (d.Bow >= 0 && lpInfo->Behavior < 0)
+		{
+			lpInfo->Behavior = (d.Bow == 0) ? GET_ITEM(4, 0) : GET_ITEM(4, 8);
+		}
+
+		if (d.Glow >= 0 && lpInfo->GlowColor < 0)
+		{
+			lpInfo->GlowColor = d.Glow;
+		}
+
+		if (pose.Valid)
+		{
+			this->m_ItemPose[item] = pose;
+		}
+
+		this->m_Effects.insert(this->m_Effects.end(), effects.begin(), effects.end());
+
+		this->m_Tooltips.insert(this->m_Tooltips.end(), tooltip.begin(), tooltip.end());
+
+		applied++;
+	}
+
+	LogAdd(LOG_BLUE, "[ContentCatalog] Data/Items: %d de %d items aplicados, %d efectos, %d líneas de tooltip", applied, (int)items.size(), (int)this->m_Effects.size(), (int)this->m_Tooltips.size());
+}
+
 void CContentCatalog::LoadItemJson(const char* folder)
 {
 	this->m_Effects.clear();
@@ -1267,32 +1890,14 @@ void CContentCatalog::LoadItemJson(const char* folder)
 		{
 			if (const JsonValue* inventory = root.Get("inventory"))
 			{
-				float position[2] = { 0.0f, 0.0f };
-
-				float rotation[3] = { 0.0f, 0.0f, 0.0f };
-
-				if (!inventory->IsObject() || !ReadVector(*inventory, "position", position, 2, error) || !ReadVector(*inventory, "rotation", rotation, 3, error))
+				if (!ReadPose(*inventory, pose, error))
 				{
-					LogAdd(LOG_RED, "[ContentCatalog] %s: 'inventory': %s", name.c_str(), error.empty() ? "tiene que ser un objeto" : error.c_str());
+					LogAdd(LOG_RED, "[ContentCatalog] %s: 'inventory': %s", name.c_str(), error.c_str());
 
 					valid = false;
 				}
 				else
 				{
-					pose.Valid = true;
-
-					pose.PositionX = position[0];
-
-					pose.PositionY = position[1];
-
-					pose.RotationX = rotation[0];
-
-					pose.RotationY = rotation[1];
-
-					pose.RotationZ = rotation[2];
-
-					pose.Scale = (float)inventory->GetNumber("scale", 0.0);
-
 					hasPose = true;
 				}
 			}

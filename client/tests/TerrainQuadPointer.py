@@ -7,9 +7,15 @@ import re
 import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
+
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
 SERVICES=r'''
 #include <cmath>
-float* DAT_080cb2cc;float* DAT_081cb608;
+float* BackTerrainHeight;float* DAT_081cb608;
 unsigned phase,vertices,texcoords,colors,components[4];bool expectLighting;float xyz[12],uv[8],rgba[16];
 namespace BufferedDraw{
 enum class Primitive{TriangleFan};
@@ -27,7 +33,7 @@ float Light(unsigned index,unsigned channel){return float(int((index*3+channel)%
 void Draw(float x,float y,float scale,int step,const float (*corners)[3],char enabled,float alpha){Terrain_RenderQuad(x,y,scale,step,ARG,enabled,alpha);}
 void Hash(std::uint64_t& h,const void* p,unsigned size){for(unsigned i=0;i<size;++i){h^=static_cast<const BYTE*>(p)[i];h*=1099511628211ull;}}
 std::uint64_t Run(BYTE* uvMemory,BYTE* heightMemory,BYTE* lightMemory){
- constexpr unsigned heightSize=65536*4+32,lightSize=65536*3*4+32;DAT_080cb2cc=reinterpret_cast<float*>(heightMemory+16);DAT_081cb608=reinterpret_cast<float*>(lightMemory+16);std::memset(heightMemory,0x5a,heightSize);std::memset(lightMemory,0x6b,lightSize);for(unsigned i=0;i<65536;++i){DAT_080cb2cc[i]=Height(i);for(unsigned a=0;a<3;++a)DAT_081cb608[i*3+a]=Light(i,a);}
+ constexpr unsigned heightSize=65536*4+32,lightSize=65536*3*4+32;BackTerrainHeight=reinterpret_cast<float*>(heightMemory+16);DAT_081cb608=reinterpret_cast<float*>(lightMemory+16);std::memset(heightMemory,0x5a,heightSize);std::memset(lightMemory,0x6b,lightSize);for(unsigned i=0;i<65536;++i){BackTerrainHeight[i]=Height(i);for(unsigned a=0;a<3;++a)DAT_081cb608[i*3+a]=Light(i,a);}
  std::vector<BYTE> expectedHeight(heightMemory,heightMemory+heightSize),expectedLight(lightMemory,lightMemory+lightSize);std::uint64_t hash=14695981039346656037ull;
  const int coordinates[]={-2,-1,0,1,2,64,127,253,254,255,256,300};const float fractions[]={-.75f,0,.5f},sizes[]={-1,0,.5f,1,2};const std::uint32_t alphaBits[]={0x3f800000u,0u,0x80000000u,0x3f000000u,0x7fc12345u};
  for(unsigned trial=0;trial<32768;++trial){
@@ -49,7 +55,7 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));auto* heights=stat
  std::printf("Terrain quad: 32768 casos, indices/vertices/UV/color %016llx\n",static_cast<unsigned long long>(expected));}
 '''
 def harness(revision=None):
- code=function(read_source('src/Terrain/Terrain_LegacyRender.cpp',revision),'Terrain_RenderQuad');constant=re.search(r'^float\s+_DAT_005524f0\s*=\s*[^;]+;',read_source('src/globals.cpp',revision),re.M).group()
+ code=function(read_source('src/render/Terrain_LegacyRender.cpp',revision),'Terrain_RenderQuad');constant=optional_definition(re.search(r'^float\s+_DAT_005524f0\s*=\s*[^;]+;',read_source('src/globals.cpp',revision),re.M))
  arg='corners' if 'const float (*p5)[3]' in code else 'static_cast<int>(reinterpret_cast<uintptr_t>(corners))'
  return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x100000')+SERVICES+constant+code+MAIN.replace('ARG',arg)
 def main():

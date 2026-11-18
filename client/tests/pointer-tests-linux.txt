@@ -166,14 +166,9 @@ tests/ErrorReportResetPointer.py --generator Ninja
 tests/TwelveWordResetPointer.py --generator Ninja
 tests/SpecialObjectPointer.py --generator Ninja
 tests/AmbientHeroPointer.py --generator Ninja
-tests/AmbientPoolInitPointer.py --generator Ninja
-tests/AmbientPoolAnimationPointer.py --generator Ninja
-tests/AmbientTerrainPointer.py --generator Ninja
-tests/AmbientSpawnHeroPointer.py --generator Ninja
+tests/AmbientFishPointer.py --generator Ninja
 tests/EquipmentOwnerPointer.py --generator Ninja
-tests/SceneAnimationGuardPointer.py --generator Ninja
-tests/SceneTypeSelectors.py --generator Ninja
-tests/SceneNumericRemainders.py --generator Ninja
+tests/SpawnEffectsReplay.py --generator Ninja
 tests/SendMovePointer.py --generator Ninja
 tests/BMDPathPointers.py --generator Ninja
 tests/HashBackingPointers.py --generator Ninja
@@ -209,3 +204,15 @@ tests/WeatherCompareCursorPointer.py --generator Ninja
 tests/WeatherSentinelCursorPointer.py --generator Ninja
 tests/WeatherRandomOffsetPointer.py --generator Ninja
 tests/ParticleOwnerPointer.py --generator Ninja
+tests/SoundTablePointer.py --generator Ninja
+tests/MonsterSpawnPointer.py --generator Ninja
+tests/NpcModelPointer.py --generator Ninja
+tests/MonsterModelPointer.py --generator Ninja
+tests/AssetListPointer.py --generator Ninja
+tests/InventoryPosePointer.py --generator Ninja
+tests/MapInfoPointer.py --generator Ninja
+tests/WorldModelsPointer.py --generator Ninja
+tests/EffectReplay.py --generator Ninja
+tests/EffectReplay.py --suite particles --generator Ninja
+tests/EffectReplay.py --suite joints --generator Ninja
+tests/MonsterViewportPointer.py --generator Ninja

@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdarg>
 
-#include "Platform/PlatformHeaders.h"
+#include "platform/PlatformHeaders.h"
 
 // OpenGL no se incluye acá: sólo el backend, con Platform/GL/glad.h (3.3 core).
 
@@ -11,7 +11,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
-#include "Platform/DebugHeaders.h"
+#include "platform/DebugHeaders.h"
 
 // Ghidra intrinsic stubs (not available in MSVC)
 #define _rand() rand()
@@ -38,17 +38,17 @@ extern int SceneFlag; // IDA: SceneFlag (0x005615C0)
 // g_hInst 0x055CA000, g_hDC 0x055CA004, WindowWidth/Height 0x0056156C/70.
 // Fuentes y DC de memoria del texto: CFont (Core/Font.h), a través de gFont.
 // El DC de OpenGL NO es el DC de memoria del texto (gFont.GetTextDC()).
-#include "Core/Window.h"
-#include "Net/Network.h"
-#include "Core/Font.h"
-#include "Game/MapManager.h"
+#include "app/core/Window.h"
+#include "net/Network.h"
+#include "app/core/Font.h"
+#include "game/core/MapManager.h"
 
 // ── Primitive type aliases (Ghidra pseudo-types) ─────────────────────────────
 #include "types.h"
-#include "Entity/EntityTypes.h"
-#include "Model/ModelTypes.h"
-#include "UI/ChatTypes.h"
-#include "Render/JointTypes.h"
+#include "game/entity/EntityTypes.h"
+#include "assets/model/ModelTypes.h"
+#include "ui/ChatTypes.h"
+#include "render/JointTypes.h"
 
 // ── Game type definitions (structs, enums, constants) ────────────────────────
 #include "structs.h"
@@ -58,13 +58,11 @@ extern int SceneFlag; // IDA: SceneFlag (0x005615C0)
 #include "globals.h"
 #include "functions.h"
 
-// ── MuEmu auto-encrypt send() hook ──────────────────────────────────────────
-// Redirect every send() call to our MuEmu_send_hook which auto-applies
-// MuEmu::EncryptSend if the buffer starts with a plain MuEmu header byte.
-// This is a SAFETY NET — explicit MuEmu::EncryptSend calls in send paths
-// must still happen.  See src/Net/MuEmu.cpp for the wrapper body.
-#include "Net/MuEmu.h"
+// ── Enganche de send() ──────────────────────────────────────────────────────
+// Todo send() del cliente pasa por MuEmu_send_hook, y de ahí al canal cifrado
+// (net/NetChannel.h): el envío tiene un solo camino.  Ver src/net/MuEmu.cpp.
+#include "net/MuEmu.h"
 #define send(s, buf, len, flags)  MuEmu_send_hook((s), (buf), (len), (flags))
 
-#include "Render/Gfx.h"
-#include "Render/RenderProfile.h"
+#include "render/Gfx.h"
+#include "render/RenderProfile.h"

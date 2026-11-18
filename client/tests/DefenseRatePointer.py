@@ -16,6 +16,12 @@ import tempfile
 from ItemSpecialPointer import harness as special_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 int g_bAddDefense, EquipmentLevelSet;
 BYTE* activeMachine;
@@ -42,7 +48,7 @@ std::uint64_t RunRate(BYTE* machine, BYTE* attribute, ITEM_ATTRIBUTE* items) {
         std::memset(machine, 0x5a, 1412); std::memset(attribute, 0, 64); std::memset(items, 0, 32 * sizeof(*items));
         attribute[11] = BYTE(Input() % 256); const unsigned short vit = static_cast<unsigned short>(Input());
         std::memcpy(machine + 22, &vit, 2);
-        DAT_07cf1ff4 = trial % 5 == 0 ? nullptr : attribute;
+        CharacterAttribute = trial % 5 == 0 ? nullptr : attribute;
         g_bAddDefense = int(Input() % 2); EquipmentLevelSet = 9 + int(Input() % 4);
         for(int i = 1; i <= 7; ++i) {
             auto* item = reinterpret_cast<ITEM*>(machine + 536 + 68*i); std::memset(item, 0, sizeof(*item));
@@ -59,7 +65,7 @@ std::uint64_t RunRate(BYTE* machine, BYTE* attribute, ITEM_ATTRIBUTE* items) {
         std::memcpy(expected, machine, sizeof(expected)); std::memcpy(beforeItems, items, sizeof(beforeItems)); std::memcpy(beforeAttribute, attribute, 64);
         int expectedReturn = 0;
         if(serverApply) std::memcpy(expected + 78, &serverRate, 2);
-        else if(DAT_07cf1ff4) {
+        else if(CharacterAttribute) {
             const int cls = attribute[11] & 7;
             int value = cls == 2 ? vit / 10 : cls == 1 ? vit / 3 : cls == 0 ? vit / 4 : vit / 5;
             for(int i = 1; i <= 7; ++i) {
@@ -114,11 +120,11 @@ def harness(revision=None):
     prefix += re.search(r"struct ITEM_ATTRIBUTE\b.*?\n\};", structs, re.S).group()
     prefix += "\nstatic_assert(sizeof(ITEM_ATTRIBUTE) == 64);\n"
     header, globals_source = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
-    for name in ("DAT_07cf1ff4", "DAT_07d78068"):
-        prefix += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
+    for name in ("CharacterAttribute", "DAT_07d78068"):
+        prefix += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
         prefix += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", globals_source, re.M).group()
-    prefix += function(read_source("src/Core/Runtime_Small.cpp", revision), "CalcDurabilityPercent")
-    rate = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "Stats_CalcDefenseRate")
+    prefix += function(read_source("src/app/core/Runtime_Small.cpp", revision), "CalcDurabilityPercent")
+    rate = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "Stats_CalcDefenseRate")
     arg = "machine" if "BYTE* param_1" in rate else "static_cast<int>(reinterpret_cast<std::uintptr_t>(machine))"
     return prefix + SERVICES + rate + MAIN.replace("CALL_RATE", f"Stats_CalcDefenseRate({arg})")
 

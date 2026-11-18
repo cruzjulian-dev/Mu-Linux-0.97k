@@ -1,0 +1,4 @@
+# Signo sobre la cabeza de los administradores (nivel 2 de GameMaster.txt): el
+# MODEL_WEBZEN_MARK del 5.2.  Lo carga render/GmSign.cpp.
+source = "Skill/AdminSign"
+model = "musign.bmd"

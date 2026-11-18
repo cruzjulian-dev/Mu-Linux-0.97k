@@ -13,6 +13,12 @@ import tempfile
 from CharacterPositionPointer import harness as position_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 void CallItemAngle(OBJECT* object) { CALL_ITEM; }
 std::uint64_t RunItems(OBJECT* object) {
@@ -54,10 +60,10 @@ int main() {
 
 def harness(revision=None):
     prefix = position_harness(revision).split("void CallPosition(CHARACTER* character)", 1)[0]
-    scale = re.search(r"float\s+Scale\s*;", read_source("src/Entity/EntityTypes.h", revision)).group()
+    scale = optional_definition(re.search(r"float\s+Scale\s*;", read_source("src/game/entity/EntityTypes.h", revision)))
     prefix = prefix.replace("BYTE beforePosition[8];", "BYTE beforeScale[4]; " + scale, 1)
     prefix += "\nstatic_assert(sizeof(void*) != 4 || (offsetof(OBJECT, Scale) == 12 && offsetof(OBJECT, Angle) == 28));\n"
-    item = function(read_source("src/Entity/Entity_LegacyEffects.cpp", revision), "ItemAngle")
+    item = function(read_source("src/game/entity/Entity_LegacyEffects.cpp", revision), "ItemAngle")
     arg = "object" if "OBJECT* object" in item else "static_cast<int>(reinterpret_cast<std::uintptr_t>(object))"
     return prefix + item + MAIN.replace("CALL_ITEM", f"ItemAngle({arg})")
 

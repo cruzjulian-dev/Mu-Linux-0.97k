@@ -21,7 +21,7 @@ std::uint64_t RunDefense(BYTE* machine, BYTE* attribute, ITEM_ATTRIBUTE* items) 
     for(int trial = 0; trial < 32768; ++trial) {
         std::memset(machine, 0x5a, 1412); std::memset(attribute, 0, 64); std::memset(items, 0, 32 * 64);
         attribute[11] = BYTE(Input()); const unsigned short dex = static_cast<unsigned short>(Input()); std::memcpy(machine + 22, &dex, 2);
-        DAT_07cf1ff4 = trial % 5 == 0 ? nullptr : attribute;
+        CharacterAttribute = trial % 5 == 0 ? nullptr : attribute;
         for(int offset : {604, 672, 740, 808, 876, 944, 1216, 1284}) {
             auto* item = reinterpret_cast<ITEM*>(machine + offset); std::memset(item, 0, sizeof(*item));
             item->Type = Input() % 5 == 0 ? -1 : short(Input() % 32); item->Durability = BYTE(Input());
@@ -35,7 +35,7 @@ std::uint64_t RunDefense(BYTE* machine, BYTE* attribute, ITEM_ATTRIBUTE* items) 
         BYTE expected[1412], beforeItems[32 * 64], beforeAttribute[64]; std::memcpy(expected, machine, 1412); std::memcpy(beforeItems, items, sizeof(beforeItems)); std::memcpy(beforeAttribute, attribute, 64);
         const ITEM* expectedReturn = nullptr;
         if(serverApply) std::memcpy(expected + 76, &serverRate, 2);
-        else if(DAT_07cf1ff4) {
+        else if(CharacterAttribute) {
             unsigned short defense = (attribute[11] & 7) == 2 ? dex / 4 : dex / 3;
             auto* shield = reinterpret_cast<ITEM*>(machine + 604);
             if(shield->Type != -1 && shield->Durability) {
@@ -77,14 +77,14 @@ int main() {
 def harness(revision=None):
     prefix = rate_harness(revision).split("int CallRate(BYTE* machine)", 1)[0]
     prefix = prefix.replace("std::memcpy(activeMachine + 78, &serverRate, 2);", "std::memcpy(activeMachine + 76, &serverRate, 2);")
-    types = read_source("src/Entity/EntityTypes.h", revision)
+    types = read_source("src/game/entity/EntityTypes.h", revision)
     prefix += "\nusing vec3_t = float[3];\nstruct OBJECT { BYTE data[444]; };\n"
     for name in ("PART_t", "CHARACTER"):
         prefix += re.search(rf"struct {name}\s*\{{.*?\}};", types, re.S).group()
     prefix += "\nstatic_assert(sizeof(void*) != 4 || (sizeof(CHARACTER) == 916 && offsetof(CHARACTER, Weapon) == 624 && offsetof(CHARACTER, BodyPart) == 480));\n"
     prefix += "\nCHARACTER* AsCharacter(void* p) { return static_cast<CHARACTER*>(p); }\nCHARACTER* AsCharacter(std::uintptr_t p) { return reinterpret_cast<CHARACTER*>(p); }\n"
-    prefix += function(read_source("src/Core/Runtime_Small.cpp", revision), "PlusSpecialPercent")
-    defense = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "Stats_CalcDefense")
+    prefix += function(read_source("src/app/core/Runtime_Small.cpp", revision), "PlusSpecialPercent")
+    defense = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "Stats_CalcDefense")
     arg = "machine" if "BYTE* param_1" in defense else "static_cast<int>(reinterpret_cast<std::uintptr_t>(machine))"
     return prefix + defense + MAIN.replace("CALL_DEFENSE", f"Stats_CalcDefense({arg})")
 

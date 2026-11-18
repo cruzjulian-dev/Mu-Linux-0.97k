@@ -49,7 +49,7 @@ std::uint64_t RunCalculate(BYTE* machine, BYTE* attribute, BYTE* allocation) {
     Require(CallCalculate(nullptr) == 0 && calcEvents.empty() && randomCount == 0 && applyCalls == 0);
     for(int trial = 0; trial < 16384; ++trial) {
         std::memset(machine, 0x5a, 1412); std::memset(attribute, 0, 64); attribute[11] = BYTE(Input());
-        DAT_07cf1ff4 = trial % 7 == 0 ? nullptr : attribute;
+        CharacterAttribute = trial % 7 == 0 ? nullptr : attribute;
         for(int offset : {14, 20, 22, 26, 1374, 1376, 1378, 1382, 1384, 1388, 1390}) WriteWord(machine, offset, static_cast<unsigned short>(Input()));
         if(trial % 4 == 0) { WriteWord(machine, 1374, 100); WriteWord(machine, 1376, 99); }
         if(trial % 4 == 1) { WriteWord(machine, 1374, 0); WriteWord(machine, 1376, 0); }
@@ -111,7 +111,7 @@ int main() {
 
 def harness(revision=None):
     prefix = base_harness(revision).split("int CallBase(BYTE* machine)", 1)[0]
-    core, scene = read_source("src/Core/Runtime_Small.cpp", revision), read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision)
+    core, scene = read_source("src/app/core/Runtime_Small.cpp", revision), read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision)
     for name in ("FUN_0047cfe0", "FUN_0047d000"):
         prefix += function(core, name)
     names = ("Stats_CalcBase", "Stats_CalcMagicDmgRange", "Stats_CalcAddStrength", "CalculateAttackSpeed", "Stats_CalcDefense", "Stats_CalcDefenseRate", "Stats_ExtraOptionEquip6", "Stats_ExtraOptionGlovesWings")
@@ -119,7 +119,7 @@ def harness(revision=None):
         prefix += function(scene, name)
     for name in names:
         prefix = prefix.replace(name + "(", name + "Real(")
-    calculate = function(read_source("src/Entity/Character_Motion.cpp", revision), "CalculateAll").replace("rand()", "CalcRandom()")
+    calculate = function(read_source("src/game/entity/Character_Motion.cpp", revision), "CalculateAll").replace("rand()", "CalcRandom()")
     arg = "machine" if "BYTE* characterMachine" in calculate else "static_cast<int>(reinterpret_cast<std::uintptr_t>(machine))"
     return prefix + WRAPPERS + calculate + MAIN.replace("CALL_CALCULATE", f"CalculateAll({arg}, 123, -456)")
 

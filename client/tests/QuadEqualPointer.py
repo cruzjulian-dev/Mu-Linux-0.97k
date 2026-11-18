@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 #include <cmath>
 std::uint32_t seed;
@@ -29,7 +35,7 @@ std::uint64_t RunQuad(float* a, float* b) {
         }
         std::uint32_t beforeA[4], beforeB[4]; std::memcpy(beforeA, a, 16); std::memcpy(beforeB, b, 16);
         int expected = 1;
-        for(int i = 0; i < 4; ++i) if(std::fabs(a[i] - b[i]) > _DAT_005528a8) expected = 0;
+        for(int i = 0; i < 4; ++i) if(std::fabs(a[i] - b[i]) > 0.001f) expected = 0;
         const int actual = CallQuad(a, b);
         Require(actual == expected && CallQuad(b, a) == expected && CallQuad(a, a) == 1);
         Require(std::memcmp(beforeA, a, 16) == 0 && std::memcmp(beforeB, b, 16) == 0);
@@ -57,8 +63,8 @@ int main() {
 
 def harness(revision=None):
     prefix = PREAMBLE.split("BYTE* reservation;", 1)[0]
-    prefix += re.search(r"^float\s+_DAT_005528a8\s*=[^;]+;", read_source("src/globals.cpp", revision), re.M).group()
-    quad = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "Terrain_QuadEqual")
+    prefix += optional_definition(re.search(r"^float\s+_DAT_005528a8\s*=[^;]+;", read_source("src/globals.cpp", revision), re.M))
+    quad = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "Terrain_QuadEqual")
     args = "a, b" if "const float* param_1" in quad else "static_cast<int>(reinterpret_cast<std::uintptr_t>(a)), static_cast<int>(reinterpret_cast<std::uintptr_t>(b))"
     return prefix + quad + MAIN.replace("CALL_QUAD", f"Terrain_QuadEqual({args}, 123, -456)")
 

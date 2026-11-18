@@ -6,13 +6,19 @@ import BmdSetupPointer as native
 from SceneObjectPointer import ROOT,read_source,build_and_run
 from GatePointer import PREAMBLE
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 def harnesses():
     code=(ROOT/'tests/fixtures/BMDSetup-b0a02c59.cpp').read_text(encoding='utf-8')
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0]+native.SERVICES
     definitions=read_source('src/globals.cpp');header=read_source('src/globals.h')
     for name in sorted(set(re.findall(r'_DAT_[0-9a-f]+',code))):
-        prefix+=re.search(rf'extern [^;\n]*\b{name}\s*;',header).group()
-        prefix+=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M).group()
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}\s*;',header))
+        prefix+=optional_definition(re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M))
     legacy=prefix+code+native.MAIN.replace('ENTITY_ARG','reinterpret_cast<uintptr_t>(activeEntity)')
     # Normalizar sólo padding dependiente de arquitectura; las guardas siguen completas.
     legacy=legacy.replace('Hash(modelMemory,224);','Hash(activeModel+72,12);')

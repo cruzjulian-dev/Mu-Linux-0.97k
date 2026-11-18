@@ -58,7 +58,7 @@ void Reset(){
     std::memcpy(g_ObjectBucketGrid,expectedGrid,sizeof(expectedGrid));Check();
 }
 void ModelUnload(){
-    for(unsigned i=0;i<0x7580;i+=0xbc)expectedEvents.push_back(0x100000+i+DAT_05828d58);
+    for(unsigned i=0;i<0x7580;i+=0xbc)expectedEvents.push_back(0x100000+i+Models);
     for(unsigned cell=0;cell<256;++cell)while(!lists[cell].empty())ModelRemove(cell,lists[cell].back());
     for(unsigned i=0x23;i<0x68;++i)expectedEvents.push_back(0x200000+i);
 }
@@ -85,12 +85,12 @@ int main(){
 
 
 def harness():
-    header = read_source("src/Entity/EntityTypes.h")
+    header = read_source("src/game/entity/EntityTypes.h")
     types = ("#include <cstdint>\n#include <cstddef>\n#include <algorithm>\n"
              "using BYTE=std::uint8_t; using vec3_t=float[3]; using vec34_t=float[3][4];\n"
              "#pragma pack(push,1)\n" + record(header, "OBJECT") +
              "\n#pragma pack(pop)\nOBJECT* AsObject(void* p){return static_cast<OBJECT*>(p);}\n")
-    cell = read_source("src/Scene/SceneObjectCell.h").replace("#pragma once", "")
+    cell = read_source("src/scenes/SceneObjectCell.h").replace("#pragma once", "")
     services = PREAMBLE.split("using Snapshot", 1)[0].replace("444", "sizeof(OBJECT)")
     return types + cell + services + "\nextern SceneObjectCell g_ObjectBucketGrid[256];\n" + production() + MAIN
 

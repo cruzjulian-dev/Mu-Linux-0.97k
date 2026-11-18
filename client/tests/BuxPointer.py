@@ -110,10 +110,10 @@ int main() {
 
 
 def harness(revision=None):
-    scene = read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision)
+    scene = read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision)
     code0 = function(scene, "BuxConvert_0")
     code1 = function(scene, "BuxConvert_1")
-    terrain = function(read_source("src/Net/Net_Bux.cpp", revision), "BuxConvert")
+    terrain = function(read_source("src/net/Net_Bux.cpp", revision), "BuxConvert")
     call0 = "BuxConvert_0(p, n);"
     call_terrain = "BuxConvert(p, n);"
     if "BuxConvert_0(int buf" in code0:
@@ -124,7 +124,7 @@ def harness(revision=None):
         f"void Call0(BYTE* p, int n) {{ {call0} }}\n"
         "void Call1(BYTE* p, int n) { BuxConvert_1(p, n); }\n"
         f"void CallTerrain(BYTE* p, int n) {{ {call_terrain} }}\n")
-    samples = [ROOT / "bin/Client/Data/Local" / name
+    samples = [__import__("data_paths").asset(ROOT, "Local/" + name)
                for name in ("item.bmd", "skill.bmd", "quest.bmd")]
     for sample in samples:
         if not sample.is_file():

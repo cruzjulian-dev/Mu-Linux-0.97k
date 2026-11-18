@@ -29,7 +29,7 @@ HRESULT __cdecl PlayBuffer(int slot, const OBJECT* owner, BOOL loop) {
 MAIN = r'''
 void CallWalk(CHARACTER* character) { CALL_WALK; }
 std::uint64_t RunWalk(CHARACTER* character, BYTE* models, BYTE* items, unsigned displacement) {
-    DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models);
+    Models = reinterpret_cast<std::uintptr_t>(models);
     DAT_055c9e44 = reinterpret_cast<std::uintptr_t>(items);
     DAT_07d78068 = DAT_055c9e44 + displacement * 64;
     Require(ItemAttribute_Base() == DAT_07d78068);
@@ -157,8 +157,8 @@ def harness(revision=None):
     prefix = stop_harness(revision).split("void Call(CHARACTER* character)", 1)[0]
     prefix = prefix.replace("HRESULT __cdecl PlayBuffer(", "HRESULT __cdecl PlayBufferReal(", 1)
     prefix = prefix.replace("struct PART_t {", "HRESULT __cdecl PlayBuffer(int, const OBJECT*, BOOL);\nstruct PART_t {", 1)
-    action = function(read_source("src/Entity/Entity_ActionLegacy.cpp", revision), "SetAction").replace("SetAction(", "SetActionReal(", 1)
-    walk = function(read_source("src/Entity/Character_Motion.cpp", revision), "SetPlayerWalk").replace("rand()", "NextRandom()")
+    action = function(read_source("src/game/entity/Entity_ActionLegacy.cpp", revision), "SetAction").replace("SetAction(", "SetActionReal(", 1)
+    walk = function(read_source("src/game/entity/Character_Motion.cpp", revision), "SetPlayerWalk").replace("rand()", "NextRandom()")
     arg = "character" if "CHARACTER* param_1" in walk else "static_cast<int>(reinterpret_cast<std::uintptr_t>(character))"
     return prefix + action + SERVICES + walk + MAIN.replace("CALL_WALK", f"SetPlayerWalk({arg})")
 

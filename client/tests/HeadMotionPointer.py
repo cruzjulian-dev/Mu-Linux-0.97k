@@ -13,6 +13,12 @@ import tempfile
 from CharacterPositionPointer import harness as position_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 void CallHead(CHARACTER* character) { CALL_HEAD; }
 void CallLook(CHARACTER* character, const CHARACTER* target) { CALL_LOOK; }
@@ -21,10 +27,10 @@ void ExpectedLook(CHARACTER& character, const CHARACTER* target) {
     OBJECT& o = character.Object;
     const auto& t = target->Object;
     const float angle = CreateAngle(o.Position[0], o.Position[1], t.Position[0], t.Position[1]);
-    if(double(FarAngle(o.Angle[2], angle, 1)) < double(_DAT_00552848)) {
+    if(double(FarAngle(o.Angle[2], angle, 1)) < double(90.0f)) {
         o.HeadTargetAngle[0] = o.Angle[2] - angle;
-        o.HeadTargetAngle[1] = (t.Position[2] - (o.Position[2] + _DAT_00552598)) * _DAT_005526e4;
-        for(int i = 0; i < 2; ++i) if(o.HeadTargetAngle[i] < _DAT_00552580) o.HeadTargetAngle[i] += _DAT_0055286c;
+        o.HeadTargetAngle[1] = (t.Position[2] - (o.Position[2] + 50.0f)) * _DAT_005526e4;
+        for(int i = 0; i < 2; ++i) if(o.HeadTargetAngle[i] < _DAT_00552580) o.HeadTargetAngle[i] += 360.0f;
     } else o.HeadTargetAngle[0] = o.HeadTargetAngle[1] = 0.0f;
 }
 std::uint64_t RunHead(CHARACTER* character, CHARACTER* pool) {
@@ -57,7 +63,7 @@ std::uint64_t RunHead(CHARACTER* character, CHARACTER* pool) {
             if((randomValues[0] & 31) == 0) {
                 expected.Object.HeadTargetAngle[0] = float(randomValues[1] % 128 - 64);
                 expected.Object.HeadTargetAngle[1] = float(randomValues[2] % 48 - 16);
-                for(int i = 0; i < 2; ++i) if(expected.Object.HeadTargetAngle[i] < _DAT_00552580) expected.Object.HeadTargetAngle[i] += _DAT_0055286c;
+                for(int i = 0; i < 2; ++i) if(expected.Object.HeadTargetAngle[i] < _DAT_00552580) expected.Object.HeadTargetAngle[i] += 360.0f;
                 expectedDraws = 3;
             }
         } else if(action != 6) {
@@ -97,7 +103,7 @@ int main() {
 
 def harness(revision=None):
     prefix = position_harness(revision).split("void CallPosition(CHARACTER* character)", 1)[0]
-    types = read_source("src/Entity/EntityTypes.h", revision)
+    types = read_source("src/game/entity/EntityTypes.h", revision)
     head = " ".join(re.search(rf"vec3_t\s+{name}\s*;", types).group() for name in ("HeadAngle", "HeadTargetAngle"))
     prefix = prefix.replace("BYTE beforeTimer[128 - 40];", head + " BYTE beforeTimer[128 - 64];", 1)
     prefix = prefix.replace("randomValues[2]", "randomValues[4]").replace("randomDraws < 2", "randomDraws < 4")
@@ -105,13 +111,13 @@ def harness(revision=None):
     globals_source = read_source("src/globals.cpp", revision)
     for name in ("_DAT_00552598", "_DAT_005526e4", "_DAT_00552580", "_DAT_0055286c", "_DAT_00552868", "_DAT_00552860", "_DAT_005524ec", "_DAT_00552864"):
         if not re.search(rf"\bfloat\s+{name}\s*=", prefix):
-            prefix += re.search(rf"^float\s+{name}\s*=[^;]+;", globals_source, re.M).group() + "\n"
+            prefix += optional_definition(re.search(rf"^float\s+{name}\s*=[^;]+;", globals_source, re.M)) + "\n"
     header = read_source("src/globals.h", revision)
-    prefix += re.search(r"extern [^;\n]*\bCharactersClient\s*;", header).group()
+    prefix += optional_definition(re.search(r"extern [^;\n]*\bCharactersClient\s*;", header))
     prefix += re.search(r"^[^/\n]*\bCharactersClient\s*=\s*[^;]+;", globals_source, re.M).group()
-    prefix += function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "CreateAngle")
-    prefix += function(read_source("src/Path/Path_Legacy.cpp", revision), "FarAngle")
-    source = read_source("src/Entity/Entity_HeadMotion.cpp", revision)
+    prefix += function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "CreateAngle")
+    prefix += function(read_source("src/game/path/Path_Legacy.cpp", revision), "FarAngle")
+    source = read_source("src/game/entity/Entity_HeadMotion.cpp", revision)
     look, move = function(source, "LookAtTarget"), function(source, "MoveHead").replace("rand()", "NextRandom()")
     call_head = "character" if "CHARACTER* character" in move else "static_cast<int>(reinterpret_cast<std::uintptr_t>(character))"
     call_look = "&character->Object, target" if "OBJECT* o" in look else "static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(character)), static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(target))"

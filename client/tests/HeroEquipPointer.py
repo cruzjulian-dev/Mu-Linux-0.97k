@@ -14,8 +14,8 @@ from SceneObjectPointer import build_and_run, function, read_source
 SERVICES=r'''
 #include <string>
 struct CHARACTER;
-std::uintptr_t DAT_07abf5d8;
-void* DAT_07cf1ffc;
+std::uintptr_t Hero;
+void* CharacterMachine;
 int SceneFlag;
 CHARACTER* expectedHero;
 int expectedPrevOp,expectedPrevSub,currentOp,currentSub;
@@ -45,7 +45,7 @@ template<unsigned Instance>std::uint64_t Run(BYTE* first,BYTE* second,BYTE* mach
         if(frame==16){for(int slot=0;slot<12;++slot)Put(machine+536+slot*68,static_cast<short>(-1));Put(machine+536,static_cast<short>(100));}
         if(frame==21)Put(machine+540+2*68,0xabcdef12u);
         BYTE* hero=(frame>=4 && frame<17?second:first)+16;expectedHero=reinterpret_cast<CHARACTER*>(hero);
-        DAT_07abf5d8=frame==12?0:reinterpret_cast<std::uintptr_t>(hero);DAT_07cf1ffc=frame==6||frame==18?nullptr:machine;
+        Hero=frame==12?0:reinterpret_cast<std::uintptr_t>(hero);CharacterMachine=frame==6||frame==18?nullptr:machine;
         SceneFlag=frame==9 || frame==20 || frame==21?2:5;
         BYTE* argument=frame==8?first+4096+16:hero;
         currentOp=0x40+frame;currentSub=frame^0x55;events.clear();formatCalls=0;
@@ -72,7 +72,7 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));auto* second=stati
 
 
 def harness(revision=None):
-    source=read_source('src/Render/Render_PlayerEquipment.cpp',revision);header=read_source('src/Entity/EntityTypes.h',revision)
+    source=read_source('src/render/Render_PlayerEquipment.cpp',revision);header=read_source('src/game/entity/EntityTypes.h',revision)
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES
     prefix+='\n'.join(re.findall(r'^inline (?:const )?CHARACTER\* AsCharacter[^\n]+',header,re.M))
     monitor=function(source,'HeroEquipWatchdog');wipe=function(source,'EquipWipe_Tick')

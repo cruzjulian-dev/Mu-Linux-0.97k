@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 #include <string>
 #include <cerrno>
@@ -127,20 +133,20 @@ int main() {
 
 def harness(revision=None):
     prefix=PREAMBLE.split("char DAT_00559bb4",1)[0]
-    prefix+=read_source("src/Sound/SoundManager.h",revision).replace("#pragma once","").replace('#include "Platform/PlatformHeaders.h"',"")
+    prefix+=read_source("src/audio/SoundManager.h",revision).replace("#pragma once","").replace('#include "platform/PlatformHeaders.h"',"")
     prefix+=SERVICES
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
     for name in ("DAT_055ca018",):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-        prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+        prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
     prefix+=re.search(r"^char\s+DAT_005580ac\[\][^;]+;",definitions,re.M).group()
-    text=read_source("src/Platform/Text.h",revision)
+    text=read_source("src/platform/Text.h",revision)
     prefix+="\nnamespace Platform {"+text[text.index("constexpr std::size_t TruncateText"):text.index("inline int TextConcatSecure")]+"}\n"
-    prefix+=function(read_source("src/Sound/SoundManager.cpp",revision),"CSound::SetMusicStoppedByUser")
-    source=read_source("src/Sound/Music.cpp",revision)
+    prefix+=function(read_source("src/audio/SoundManager.cpp",revision),"CSound::SetMusicStoppedByUser")
+    source=read_source("src/audio/Music.cpp",revision)
     for name in ("CSound::StopTrack","CSound::PlayTrack","Music_PlayTrack","Music_StopTrack"):
         prefix+=function(source,name)
-    prefix+=function(read_source("src/Core/Runtime_Linker.cpp",revision),"StopMp3")
+    prefix+=function(read_source("src/app/core/Runtime_Linker.cpp",revision),"StopMp3")
     arg="name" if "const char* name" in function(source,"Music_PlayTrack").split("{",1)[0] else "static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(name))"
     return prefix+MAIN.replace("NAME_ARG",arg)
 

@@ -11,7 +11,7 @@ SERVICES=r'''
 #include <cmath>
 #include <algorithm>
 #include <array>
-BYTE* buffers;uintptr_t DAT_05828d58;unsigned DAT_0839bc8c;
+BYTE* buffers;uintptr_t Models;unsigned WaterTextureNumber;
 #define DAT_0584621c (*reinterpret_cast<DWORD*>(buffers))
 #define DAT_077e298c (*reinterpret_cast<DWORD*>(buffers+400000))
 #define DAT_060db65c (*reinterpret_cast<char*>(buffers+550000))
@@ -57,7 +57,7 @@ std::uint64_t Run(BYTE* modelMem,BYTE* tables,BYTE* data){buffers=data;std::uint
  for(unsigned mesh=0;mesh<2;++mesh){for(unsigned v=0;v<4;++v)for(unsigned a=0;a<3;++a){PutFloat(data+mesh*180000+v*12+a*4,float(int(mesh*10+v*3+a)-7)*.125f);PutFloat(data+1000000+mesh*180000+v*12+a*4,float(int(v+a)-3)*.0625f);}for(unsigned i=0;i<4;++i)PutFloat(data+400000+mesh*60000+i*4,float(i)*.25f);}
  std::vector<BYTE> original(data,data+1600000);
  for(unsigned trial=0;trial<4096;++trial){
-  std::memcpy(data,original.data(),1600000);std::memset(modelMem,0xa5,sizeof(BMD)+32);std::memset(tables,0x6d,2048);subject=reinterpret_cast<BMD*>(modelMem+16);const unsigned mesh=trial%2;wantedIndex=mesh;wantedModel=slots[(trial/2)%3];DAT_05828d58=reinterpret_cast<uintptr_t>(subject)-wantedModel*sizeof(BMD);DAT_0839bc8c=trial%4;WorldTime=float(int(trial)-2000)+.25f;
+  std::memcpy(data,original.data(),1600000);std::memset(modelMem,0xa5,sizeof(BMD)+32);std::memset(tables,0x6d,2048);subject=reinterpret_cast<BMD*>(modelMem+16);const unsigned mesh=trial%2;wantedIndex=mesh;wantedModel=slots[(trial/2)%3];Models=reinterpret_cast<uintptr_t>(subject)-wantedModel*sizeof(BMD);WaterTextureNumber=trial%4;WorldTime=float(int(trial)-2000)+.25f;
   subject->Meshs=tables;subject->IndexTexture=reinterpret_cast<short*>(tables+192);subject->LightEnable=(trial/7)%2;subject->StreamMesh=char(int((trial/13)%3)-1);subject->Skin=char(int(trial%7)-3);subject->HideSkin=(trial/19)%2;for(unsigned a=0;a<3;++a)subject->BodyLight[a]=float(a+1)*.25f;
   wantedMesh=reinterpret_cast<ClothModelMesh*>(tables)+mesh;wantedMesh->TextureIndex=short(mesh);wantedMesh->VertexCount=4;wantedMesh->NormalCount=4;wantedMesh->TexCoordCount=4;wantedMesh->TriangleCount=short((trial/2)%3);wantedMesh->Unknown0[0]=(trial/23)%5==0;wantedMesh->TexCoords=tables+256;wantedMesh->Triangles=tables+384;wantedMesh->TextureFlags=trial%7?tables+512:nullptr;wantedMesh->Vertices=tables+640;wantedMesh->Normals=tables+768;
   tables[512]=(trial/29)%2;tables[514]=(trial/19)%2;tables[515]=(trial/31)%2;
@@ -73,7 +73,7 @@ std::uint64_t Run(BYTE* modelMem,BYTE* tables,BYTE* data){buffers=data;std::uint
   // Oráculo UV: prioridad de modos y fórmulas desde las muestras, sin consumir scratch.
   const bool bright=wantedModel>=963&&wantedMesh->TextureFlags&&tables[512];const bool blended=blend<=-2||int(mesh)==blend||(!animated&&bright);const bool chrome=!animated&&!(flags&1)&&(flags&(4|8|0x200));const bool textured=!(flags&1)&&!chrome&&(blended||(flags&2)||!(flags&0x40));checkUV=chrome||textured;expectedUV.clear();
   const bool uvOffset=(int(mesh)==blend||int(mesh)==int(subject->StreamMesh)||(wantedMesh->TextureFlags&&tables[514]))&&(u!=0||v!=0);
-  for(int poly=0;poly<wantedMesh->TriangleCount;++poly)for(int corner=0;corner<(nv==5?0:nv);++corner){const unsigned vertex=(corner+poly)%4,normal=(corner+1)%4;std::array<float,3> pos{};for(unsigned a=0;a<3;++a){pos[a]=float(int(mesh*10+vertex*3+a)-7)*.125f;if(animated&&deform){const int phase=int(WorldTime)+931*int(vertex);const float sn=float(std::sin(double(phase)*double(_DAT_005528c4)));pos[a]=sn*(float(int(normal+a)-3)*.0625f)*_DAT_00552644+pos[a];}}expectedPositions.push_back(pos);}
+  for(int poly=0;poly<wantedMesh->TriangleCount;++poly)for(int corner=0;corner<(nv==5?0:nv);++corner){const unsigned vertex=(corner+poly)%4,normal=(corner+1)%4;std::array<float,3> pos{};for(unsigned a=0;a<3;++a){pos[a]=float(int(mesh*10+vertex*3+a)-7)*.125f;if(animated&&deform){const int phase=int(WorldTime)+931*int(vertex);const float sn=float(std::sin(double(phase)*double(0.007f)));pos[a]=sn*(float(int(normal+a)-3)*.0625f)*28.0f+pos[a];}}expectedPositions.push_back(pos);}
   for(int poly=0;poly<wantedMesh->TriangleCount;++poly)for(int corner=0;corner<(nv==5?0:nv);++corner){std::array<float,2> uv{};const unsigned normal=(corner+1)%4,tex=(corner+2)%4;if(textured){uv={float(tex)*.25f,float(tex)*.125f};if(uvOffset){uv[0]+=u;uv[1]+=v;}}else if(chrome){const float x=float(int(normal)-3)*.0625f,y=float(int(normal)-2)*.0625f,z=float(int(normal)-1)*.0625f;const auto time=static_cast<long long>(WorldTime);const float phase=float(int(time%10000))*_DAT_00552868,oil=float(int(time%5000))*_DAT_005528c0-_DAT_005528b4;if(flags&0x200)uv={oil+oil+(z+x)*_DAT_00552530,oil*_DAT_00552540+y+x};else if(flags&4)uv={z*_DAT_00552504+phase,y*_DAT_00552504+phase+phase};else uv={z*_DAT_00552504+_DAT_005526e4,(y+_DAT_0055256c)*_DAT_00552504};}expectedUV.push_back(uv);}
   float index=float(mesh);if(trial%2){unsigned bits=mesh;std::memcpy(&index,&bits,4);}
   if(trial%41==0)BMD__RenderMeshTranslate(subject,char((trial/23)%4),0,float(mesh)+.25f,int(flags),alpha,blend,u,v,.75f,overrideTexture);
@@ -93,11 +93,11 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);auto 
 '''
 
 def harness(revision=None):
-    headers='\n'.join(re.sub(r'#include "[^\"]+"|#pragma once','',read_source(p)) for p in ['src/Render/Materials.h','src/Render/BufferedDraw.h','src/Render/BMDDevice.h','src/Render/MeshDraw.h'])
+    headers='\n'.join(re.sub(r'#include "[^\"]+"|#pragma once','',read_source(p)) for p in ['src/render/Materials.h','src/render/BufferedDraw.h','src/render/BMDDevice.h','src/render/MeshDraw.h'])
     constants='\n'.join(re.findall(r'^float\s+_DAT_(?:00552868|00552544|00552580|005528c0|005528b4|00552504|0055256c|005526e4|00552540|00552530|005528c4|00552644)\s*=\s*[^;]+;',read_source('src/globals.cpp'),re.M))
-    source=read_source('src/Render/BMD_DrawMesh.cpp',revision)
-    funcs=function(read_source('src/Render/BMD_LegacyDraw.cpp',revision),'BMD__RenderMeshTranslate')+function(source,'DecodeMeshIndex')+function(source,'BMD__RenderMesh')
-    return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x200000')+layouts()+'\n#pragma pack(push,1)\n'+record(read_source('src/Physics/ClothTypes.h'),'ClothModelMesh')+'\n#pragma pack(pop)\n'+headers+SERVICES+constants+funcs+MAIN
+    source=read_source('src/render/BMD_DrawMesh.cpp',revision)
+    funcs=function(read_source('src/render/BMD_LegacyDraw.cpp',revision),'BMD__RenderMeshTranslate')+function(source,'DecodeMeshIndex')+function(source,'BMD__RenderMesh')
+    return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x200000')+layouts()+'\n#pragma pack(push,1)\n'+record(read_source('src/game/physics/ClothTypes.h'),'ClothModelMesh')+'\n#pragma pack(pop)\n'+headers+SERVICES+constants+funcs+MAIN
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--architecture',choices=('Win32','x64'),default='x64');p.add_argument('--generator');p.add_argument('--reference-ref');a=p.parse_args()

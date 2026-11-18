@@ -11,11 +11,11 @@ void PrepareContext(OBJECT* entity, void* model)
     short cls = AsObject(entity)->Type;
     if (cls == 0x14b) {
         *(DWORD*)(modelBase + 0x6c) = *(DWORD *)&AsObject(entity)->Position[0];
-        *(float *)(modelBase + 0x70) = AsObject(entity)->Position[1] + _DAT_0055290c;
+        *(float *)(modelBase + 0x70) = AsObject(entity)->Position[1] + 60.0f;
         *(DWORD*)(modelBase + 0x74) = *(DWORD *)&AsObject(entity)->Position[2];
     } else if (cls == 0x14a) {
         *(DWORD*)(modelBase + 0x6c) = *(DWORD *)&AsObject(entity)->Position[0];
-        *(float *)(modelBase + 0x70) = AsObject(entity)->Position[1] + _DAT_00552908;
+        *(float *)(modelBase + 0x70) = AsObject(entity)->Position[1] + 120.0f;
         *(DWORD*)(modelBase + 0x74) = *(DWORD *)&AsObject(entity)->Position[2];
     }
 }

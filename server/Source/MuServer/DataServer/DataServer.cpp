@@ -84,19 +84,23 @@ int main()
 		}
 		else
 		{
+			// Antes de escuchar: el accept consulta la lista.
+			gAllowableIpList.Load("AllowableIpList.txt");
+
+			gBadSyntax.Load("BadSyntax.txt");
+
+			// Precargar los gremios ANTES de abrir el puerto: si el socket escucha
+			// primero, un cliente que conecta en ese instante consulta datos de
+			// gremio que todavia no se cargaron.
+			gGuildManager.Init();
+
 			if (gSocketManager.Start(DS_TCP_Port) == false)
 			{
 				gQueryManager.Disconnect();
 			}
 			else
 			{
-				gAllowableIpList.Load("AllowableIpList.txt");
-
-				gBadSyntax.Load("BadSyntax.txt");
-
 				SetTimer(hWnd, TIMER_1000, 1000, 0);
-
-				gGuildManager.Init();
 			}
 		}
 	}

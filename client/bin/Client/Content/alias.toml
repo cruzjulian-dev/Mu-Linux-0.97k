@@ -1,0 +1,255 @@
+# Alias de rutas (Platform/ContentLayers.h): el cliente sigue pidiendo las
+# rutas de Data y esta tabla dice dónde quedaron en el orden nuevo. Las claves
+# son relativas al interior de Data; los valores, al de Content (y de cada pack
+# o carpeta de server). Si dos claves coinciden gana la más larga.
+
+[alias]
+# Música separada por uso: temas de mapa, cortinas de eventos y pantallas.
+"Music" = "audio/music/map"
+"Music/devil_square_intro.mp3" = "audio/music/event/devil_square_intro.mp3"
+"Music/devil_square_outro.mp3" = "audio/music/event/devil_square_outro.mp3"
+"Music/DuelArena.mp3" = "audio/music/event/DuelArena.mp3"
+"Music/PK_Field.mp3" = "audio/music/event/PK_Field.mp3"
+"Music/login_theme.mp3" = "audio/music/screen/login_theme.mp3"
+"Music/main_theme.mp3" = "audio/music/screen/main_theme.mp3"
+"Music/MuTheme.mp3" = "audio/music/screen/MuTheme.mp3"
+
+# Mapas: WorldN = terreno, ObjectN = objetos del mapa N-1 (como Data/Maps del server).
+# Blood Castle 1..6 comparte una carpeta, como en el binario (Object12/World12).
+"World1" = "map/00-Lorencia/terrain"
+"Object1" = "map/00-Lorencia/objects"
+"World2" = "map/01-Dungeon/terrain"
+"Object2" = "map/01-Dungeon/objects"
+"World3" = "map/02-Devias/terrain"
+"Object3" = "map/02-Devias/objects"
+"World4" = "map/03-Noria/terrain"
+"Object4" = "map/03-Noria/objects"
+"World5" = "map/04-LostTower/terrain"
+"Object5" = "map/04-LostTower/objects"
+"World6" = "map/05-Exile/terrain"
+"Object6" = "map/05-Exile/objects"
+"World7" = "map/06-Arena/terrain"
+"Object7" = "map/06-Arena/objects"
+"World8" = "map/07-Atlans/terrain"
+"Object8" = "map/07-Atlans/objects"
+"World9" = "map/08-Tarkan/terrain"
+"Object9" = "map/08-Tarkan/objects"
+"World10" = "map/09-DevilSquare/terrain"
+"Object10" = "map/09-DevilSquare/objects"
+"World11" = "map/10-Icarus/terrain"
+"Object11" = "map/10-Icarus/objects"
+"World12" = "map/11-BloodCastle/terrain"
+"Object12" = "map/11-BloodCastle/objects"
+
+# Interfaz: login y seleccion de personaje, HUD y ventanas; sonidos.
+"Logo" = "ui/login"
+"Interface" = "ui/interface"
+"Sound" = "audio/sound"
+
+# Sprites de efectos (los modelos de Data/Skill van por entidad en effect/model).
+"Effect" = "effect/sprite"
+
+# Data/Local repartido. Font/, Enc1.dat/Dec2.dat y Macro.txt quedan en Data (lo
+# mínimo para arrancar).
+#
+# Textos: una carpeta por idioma con los nombres sin sufijo. Text.bmd y
+# Dialog.bmd (sin idioma) eran copias del español: apuntan a esos.
+"Local/Text.bmd" = "text/spn/Text.bmd"
+"Local/Text_Spn.bmd" = "text/spn/Text.bmd"
+"Local/Text_Eng.bmd" = "text/eng/Text.bmd"
+"Local/Text_Por.bmd" = "text/por/Text.bmd"
+"Local/Dialog.bmd" = "text/spn/Dialog.bmd"
+"Local/Dialog_Spn.bmd" = "text/spn/Dialog.bmd"
+"Local/Dialog_Eng.bmd" = "text/eng/Dialog.bmd"
+"Local/Dialog_Por.bmd" = "text/por/Dialog.bmd"
+"Local/NPCName.txt" = "text/eng/NPCName.txt"
+"Local/NPCName(kor).txt" = "text/kor/NPCName.txt"
+# Filtro de palabras del chat y de nombres de personaje.
+"Local/Filter.bmd" = "text/filter/Filter.bmd"
+"Local/FilterName.bmd" = "text/filter/FilterName.bmd"
+# Tablas con su tema. item.bmd, skill.bmd y Gate.bmd son además el respaldo de
+# lo que manda el server en el catálogo (si lo manda, gana el catálogo).
+"Local/item.bmd" = "item/item.bmd"
+"Local/skill.bmd" = "skill/skill.bmd"
+"Local/quest.bmd" = "quest/quest.bmd"
+"Local/Loading01.ozj" = "ui/loading/Loading01.ozj"
+"Local/Loading02.ozj" = "ui/loading/Loading02.ozj"
+"Local/Loading03.ozj" = "ui/loading/Loading03.ozj"
+"Local/Webzenlogo.ozj" = "ui/loading/Webzenlogo.ozj"
+"Local/Everyone.OZJ" = "ui/loading/Everyone.OZJ"
+"Gate.bmd" = "map/Gate.bmd"
+
+# Great Dragon: el catálogo lo pide en Player/Custom/21 y el cargador de sets en
+# Player/. Es una sola carpeta (set/21-GreatDragon); hide y level_man01 de esa
+# carpeta son versiones propias del set y sólo se usan por esta ruta.
+"Player/Custom/21" = "set/21-GreatDragon"
+
+# BMD identicos byte a byte (mismo modelo para varios items u objetos): queda
+# un solo archivo y las demas rutas apuntan a el.
+# Mismo archivo que effect/model/Arrowsaw01/Arrowsaw01.bmd
+"effect/model/Saw01/Saw01.bmd" = "effect/model/Arrowsaw01/Arrowsaw01.bmd"
+"skill/Saw01.bmd" = "effect/model/Arrowsaw01/Arrowsaw01.bmd"
+# Mismo archivo que item/02-maces/008/Mace72.bmd
+"item/Mace14.bmd" = "item/02-maces/008/Mace72.bmd"
+"item/unused/Mace14.bmd" = "item/02-maces/008/Mace72.bmd"
+# Mismo archivo que item/12-wings/007/Gem01.bmd
+"item/12-wings/008/Gem02.bmd" = "item/12-wings/007/Gem01.bmd"
+"item/Gem02.bmd" = "item/12-wings/007/Gem01.bmd"
+"item/12-wings/009/Gem03.bmd" = "item/12-wings/007/Gem01.bmd"
+"item/Gem03.bmd" = "item/12-wings/007/Gem01.bmd"
+"item/12-wings/010/Gem04.bmd" = "item/12-wings/007/Gem01.bmd"
+"item/Gem04.bmd" = "item/12-wings/007/Gem01.bmd"
+"item/12-wings/011/Gem05.bmd" = "item/12-wings/007/Gem01.bmd"
+"item/Gem05.bmd" = "item/12-wings/007/Gem01.bmd"
+# Mismo archivo que item/12-wings/013/Gem07.bmd
+"item/12-wings/014/Gem08.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/Gem08.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/12-wings/016/Gem10.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/Gem10.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/12-wings/017/Gem11.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/Gem11.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/12-wings/018/Gem12.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/Gem12.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/12-wings/019/Gem13.bmd" = "item/12-wings/013/Gem07.bmd"
+"item/Gem13.bmd" = "item/12-wings/013/Gem07.bmd"
+# Mismo archivo que item/15-scrolls/000/Book01.bmd
+"item/15-scrolls/001/Book02.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book02.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/002/Book03.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book03.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/003/Book04.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book04.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/004/Book05.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book05.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/005/Book06.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book06.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/006/Book07.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book07.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/007/Book08.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book08.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/008/Book09.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book09.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/009/Book10.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book10.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/010/Book11.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book11.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/011/Book12.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book12.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/012/Book13.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book13.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/013/Book14.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book14.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/014/Book15.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book15.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/15-scrolls/015/Book16.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book16.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book17.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/unused/Book17.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book18.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/unused/Book18.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/Book19.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/unused/Book19.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/SkillScroll01.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/unused/SkillScroll01.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/SkillScroll02.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/unused/SkillScroll02.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/SkillScroll03.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/unused/SkillScroll03.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/SkillScroll04.bmd" = "item/15-scrolls/000/Book01.bmd"
+"item/unused/SkillScroll04.bmd" = "item/15-scrolls/000/Book01.bmd"
+# Mismo archivo que map/00-Lorencia/objects/Light01.bmd
+"map/00-Lorencia/objects/Light02.bmd" = "map/00-Lorencia/objects/Light01.bmd"
+"object1/Light02.bmd" = "map/00-Lorencia/objects/Light01.bmd"
+"map/00-Lorencia/objects/Light03.bmd" = "map/00-Lorencia/objects/Light01.bmd"
+"object1/Light03.bmd" = "map/00-Lorencia/objects/Light01.bmd"
+# Mismo archivo que map/00-Lorencia/objects/Ship01.bmd
+"map/05-Exile/objects/Object31.bmd" = "map/00-Lorencia/objects/Ship01.bmd"
+"object6/Object31.bmd" = "map/00-Lorencia/objects/Ship01.bmd"
+# Mismo archivo que map/01-Dungeon/objects/Object12.bmd
+"map/05-Exile/objects/Object19.bmd" = "map/01-Dungeon/objects/Object12.bmd"
+"object6/Object19.bmd" = "map/01-Dungeon/objects/Object12.bmd"
+# Mismo archivo que map/01-Dungeon/objects/Object54.bmd
+"map/05-Exile/objects/Object07.bmd" = "map/01-Dungeon/objects/Object54.bmd"
+"object6/Object07.bmd" = "map/01-Dungeon/objects/Object54.bmd"
+# Mismo archivo que map/02-Devias/objects/Object25.bmd
+"map/02-Devias/objects/Object27.bmd" = "map/02-Devias/objects/Object25.bmd"
+"object3/Object27.bmd" = "map/02-Devias/objects/Object25.bmd"
+"map/02-Devias/objects/Object33.bmd" = "map/02-Devias/objects/Object25.bmd"
+"object3/Object33.bmd" = "map/02-Devias/objects/Object25.bmd"
+"map/02-Devias/objects/Object90.bmd" = "map/02-Devias/objects/Object25.bmd"
+"object3/Object90.bmd" = "map/02-Devias/objects/Object25.bmd"
+# Mismo archivo que map/05-Exile/objects/Object04.bmd
+"map/07-Atlans/objects/Object04.bmd" = "map/05-Exile/objects/Object04.bmd"
+"object8/Object04.bmd" = "map/05-Exile/objects/Object04.bmd"
+# Mismo archivo que map/05-Exile/objects/Object05.bmd
+"map/07-Atlans/objects/Object05.bmd" = "map/05-Exile/objects/Object05.bmd"
+"object8/Object05.bmd" = "map/05-Exile/objects/Object05.bmd"
+# Mismo archivo que map/05-Exile/objects/Object10.bmd
+"map/07-Atlans/objects/Object20.bmd" = "map/05-Exile/objects/Object10.bmd"
+"object8/Object20.bmd" = "map/05-Exile/objects/Object10.bmd"
+# Mismo archivo que map/05-Exile/objects/Object17.bmd
+"map/07-Atlans/objects/Object17.bmd" = "map/05-Exile/objects/Object17.bmd"
+"object8/Object17.bmd" = "map/05-Exile/objects/Object17.bmd"
+# Mismo archivo que map/05-Exile/objects/Object20.bmd
+"map/07-Atlans/objects/Object16.bmd" = "map/05-Exile/objects/Object20.bmd"
+"object8/Object16.bmd" = "map/05-Exile/objects/Object20.bmd"
+# Mismo archivo que map/05-Exile/objects/Object21.bmd
+"map/07-Atlans/objects/Object15.bmd" = "map/05-Exile/objects/Object21.bmd"
+"object8/Object15.bmd" = "map/05-Exile/objects/Object21.bmd"
+# Mismo archivo que map/05-Exile/objects/Object25.bmd
+"map/07-Atlans/objects/Object12.bmd" = "map/05-Exile/objects/Object25.bmd"
+"object8/Object12.bmd" = "map/05-Exile/objects/Object25.bmd"
+# Mismo archivo que map/05-Exile/objects/Object26.bmd
+"map/07-Atlans/objects/Object14.bmd" = "map/05-Exile/objects/Object26.bmd"
+"object8/Object14.bmd" = "map/05-Exile/objects/Object26.bmd"
+# Mismo archivo que map/05-Exile/objects/Object28.bmd
+"map/07-Atlans/objects/Object31.bmd" = "map/05-Exile/objects/Object28.bmd"
+"object8/Object31.bmd" = "map/05-Exile/objects/Object28.bmd"
+# Mismo archivo que map/05-Exile/objects/Object29.bmd
+"map/07-Atlans/objects/Object33.bmd" = "map/05-Exile/objects/Object29.bmd"
+"object8/Object33.bmd" = "map/05-Exile/objects/Object29.bmd"
+# Mismo archivo que map/05-Exile/objects/Object30.bmd
+"map/07-Atlans/objects/Object30.bmd" = "map/05-Exile/objects/Object30.bmd"
+"object8/Object30.bmd" = "map/05-Exile/objects/Object30.bmd"
+# Mismo archivo que map/05-Exile/objects/Object40.bmd
+"map/07-Atlans/objects/Object10.bmd" = "map/05-Exile/objects/Object40.bmd"
+"object8/Object10.bmd" = "map/05-Exile/objects/Object40.bmd"
+# Mismo archivo que map/05-Exile/objects/Object41.bmd
+"map/07-Atlans/objects/Object08.bmd" = "map/05-Exile/objects/Object41.bmd"
+"object8/Object08.bmd" = "map/05-Exile/objects/Object41.bmd"
+# Mismo archivo que map/08-Tarkan/objects/Object37.bmd
+"map/08-Tarkan/objects/Object79.bmd" = "map/08-Tarkan/objects/Object37.bmd"
+"object9/Object79.bmd" = "map/08-Tarkan/objects/Object37.bmd"
+# Mismo archivo que map/08-Tarkan/objects/Object61.bmd
+"map/08-Tarkan/objects/Object71.bmd" = "map/08-Tarkan/objects/Object61.bmd"
+"object9/Object71.bmd" = "map/08-Tarkan/objects/Object61.bmd"
+"map/08-Tarkan/objects/Object77.bmd" = "map/08-Tarkan/objects/Object61.bmd"
+"object9/Object77.bmd" = "map/08-Tarkan/objects/Object61.bmd"
+"map/08-Tarkan/objects/Object78.bmd" = "map/08-Tarkan/objects/Object61.bmd"
+"object9/Object78.bmd" = "map/08-Tarkan/objects/Object61.bmd"
+"map/08-Tarkan/objects/Object84.bmd" = "map/08-Tarkan/objects/Object61.bmd"
+"object9/Object84.bmd" = "map/08-Tarkan/objects/Object61.bmd"
+# Mismo archivo que map/08-Tarkan/objects/Object66.bmd
+"map/08-Tarkan/objects/Object68.bmd" = "map/08-Tarkan/objects/Object66.bmd"
+"object9/Object68.bmd" = "map/08-Tarkan/objects/Object66.bmd"
+# Mismo archivo que map/10-Icarus/objects/Object01.bmd
+"map/10-Icarus/objects/Object02.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"object11/Object02.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"map/10-Icarus/objects/Object03.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"object11/Object03.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"map/10-Icarus/objects/Object04.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"object11/Object04.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"map/10-Icarus/objects/Object05.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"object11/Object05.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"map/10-Icarus/objects/Object06.bmd" = "map/10-Icarus/objects/Object01.bmd"
+"object11/Object06.bmd" = "map/10-Icarus/objects/Object01.bmd"
+# Mismo archivo que map/11-BloodCastle/objects/Object08.bmd
+"map/11-BloodCastle/objects/Object25.bmd" = "map/11-BloodCastle/objects/Object08.bmd"
+"object12/Object25.bmd" = "map/11-BloodCastle/objects/Object08.bmd"
+"map/11-BloodCastle/objects/Object33.bmd" = "map/11-BloodCastle/objects/Object08.bmd"
+"object12/Object33.bmd" = "map/11-BloodCastle/objects/Object08.bmd"
+# Mismo archivo que item/unused/EventBloodCastle04.bmd
+"item/EventBloodCastle05.bmd" = "item/unused/EventBloodCastle04.bmd"
+"item/unused/EventBloodCastle05.bmd" = "item/unused/EventBloodCastle04.bmd"
+"item/EventBloodCastle06.bmd" = "item/unused/EventBloodCastle04.bmd"
+"item/unused/EventBloodCastle06.bmd" = "item/unused/EventBloodCastle04.bmd"

@@ -25,7 +25,7 @@ int Particle_Spawn(int type, float* position, float* angle, float* light, int fl
 MAIN = r'''
 void CallShock(CHARACTER* character, int hit) { CALL_SHOCK; }
 std::uint64_t RunShock(CHARACTER* character, BYTE* models) {
-    DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models);
+    Models = reinterpret_cast<std::uintptr_t>(models);
     g_EnableSound = TRUE; activeCharacter = character;
     for(int slot = 0; slot < 420; ++slot) { MaxBufferChannel[slot] = 4; Enable3DSound[slot] = true; }
     seed = 0x97c444b6; digest = 14695981039346656037ull;
@@ -139,7 +139,7 @@ def harness(revision=None):
     prefix = die_harness(revision).split("void CallDie(CHARACTER* character)", 1)[0]
     prefix = prefix.replace("randomValues[2]", "randomValues[32]").replace("Require(randomDraws < 2)", "Require(randomDraws < 32)")
     prefix = prefix.replace("owner == AsObject(activeCharacter) && loop == 0", "(owner == AsObject(activeCharacter) || (slot == 105 && !owner)) && loop == 0")
-    shock = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "SetPlayerShock").replace("rand()", "NextRandom()")
+    shock = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "SetPlayerShock").replace("rand()", "NextRandom()")
     arg = "character" if "CHARACTER* c" in shock else "static_cast<int>(reinterpret_cast<std::uintptr_t>(character))"
     return prefix + SERVICES + shock + MAIN.replace("CALL_SHOCK", f"SetPlayerShock({arg}, hit)")
 

@@ -75,6 +75,41 @@ DWORD gLevelExperience[MAX_CHARACTER_LEVEL + 1];
 // OBJECT MAIN FUNCTIONS ***************************************************//
 //**************************************************************************//
 
+// Fase 5: presupuesto de movimiento, en milisegundos.  Se recarga con el
+// tiempo transcurrido hasta MoveCheckBudget y cada tile que avanza el
+// personaje cuesta MoveCheckTileTime: los pasos del server (ObjectMoveProc)
+// y los saltos al inicio del camino o a la posición que manda el cliente.
+// El costo es el del cliente más rápido (250 ms por tile, ver ServerInfo),
+// no el MoveSpeed del server (400): el cliente camina más rápido que el
+// server y con 400 el saldo se vaciaba caminando en línea recta.
+// Devuelve false si el gasto deja el saldo en negativo (el saldo queda en 0).
+bool gObjMoveBudgetCharge(LPOBJ lpObj, int cost)
+{
+	DWORD now = GetTickCount();
+
+	long long budget = (long long)lpObj->MoveBudget + (now - lpObj->MoveBudgetTime);
+
+	lpObj->MoveBudgetTime = now;
+
+	if (budget > gServerInfo.m_MoveCheckBudget)
+	{
+		budget = gServerInfo.m_MoveCheckBudget;
+	}
+
+	budget -= cost;
+
+	if (budget < 0)
+	{
+		lpObj->MoveBudget = 0;
+
+		return false;
+	}
+
+	lpObj->MoveBudget = (int)budget;
+
+	return true;
+}
+
 void gObjEventRunProc()
 {
 	gBloodCastle.MainProc();
@@ -229,7 +264,7 @@ void gObjAllDisconnect()
 	}
 }
 
-void gObjSetExperienceTable()
+void gObjSetExperienceTable(double exponent)
 {
 	memset(gLevelExperience, 0, sizeof(gLevelExperience));
 
@@ -237,11 +272,11 @@ void gObjSetExperienceTable()
 	double maxExperience = DWORD_MAX * 0.95; // Aproximar al máximo seguro
 
 	// Ajustar el multiplicador dinámicamente
-	double scaleFactor = maxExperience / pow(gServerInfo.m_MaxCharacterLevel, 3);
+	double scaleFactor = maxExperience / pow(gServerInfo.m_MaxCharacterLevel, exponent);
 
 	for (int level = 1; level <= gServerInfo.m_MaxCharacterLevel; level++)
 	{
-		gLevelExperience[level] = (DWORD)(scaleFactor * pow(level, 3));
+		gLevelExperience[level] = (DWORD)(scaleFactor * pow(level, exponent));
 	}
 }
 
@@ -347,6 +382,11 @@ void gObjCharZeroSet(int aIndex)
 
 	lpObj->LastAttackTime = 0;
 
+	// Presupuesto de movimiento en 0 con hora 0: el primer reintegro lo llena.
+	lpObj->MoveBudget = 0;
+
+	lpObj->MoveBudgetTime = 0;
+
 	lpObj->Authority = 0;
 
 	lpObj->AuthorityCode = 0;
@@ -378,6 +418,12 @@ void gObjCharZeroSet(int aIndex)
 	lpObj->DelayLevel = 0;
 
 	lpObj->DrinkSpeed = 0;
+
+	lpObj->SentPhysiSpeed = -1;
+
+	lpObj->SentMagicSpeed = -1;
+
+	lpObj->SentRateHP = -1;
 
 	lpObj->DrinkLastTime = 0;
 
@@ -619,6 +665,10 @@ void gObjClearPlayerOption(LPOBJ lpObj)
 	{
 		memset(&lpObj->HackPacketCount[n], 0, sizeof(lpObj->HackPacketCount[n]));
 	}
+
+	lpObj->PacketRateTime = 0;
+
+	lpObj->PacketRateCount = 0;
 }
 
 void gObjClearSpecialOption(LPOBJ lpObj)
@@ -902,6 +952,8 @@ short gObjAdd(SOCKET socket, char* IpAddress, int aIndex)
 	memset(lpObj->Account, 0, sizeof(lpObj->Account));
 
 	memset(lpObj->HardwareID, 0, sizeof(lpObj->HardwareID));
+
+	lpObj->CatalogCacheCount = 0;
 
 	gSerialCheck[aIndex].Init();
 
@@ -2235,13 +2287,14 @@ void gObjSecondProc()
 
 					continue;
 				}
+
+				// La regeneración también mueve la barra (F3:E2 sólo si cambió).
+				GCHealthBarUpdate(lpObj->Index);
 			}
 
 			if (lpObj->Type == OBJECT_USER)
 			{
 				gObjCheckMapTile(lpObj, 3);
-
-				GCHealthBarSend(lpObj->Index);
 
 				gEventTimeManager.GCEventTimeSend(lpObj->Index);
 

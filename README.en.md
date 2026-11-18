@@ -18,6 +18,161 @@ Mu Online 0.97k server and client in a single repository. The server (Mu-Linux, 
 
 Client and server share the version numbers and ship together in each Release. Up to 0.97.40 the client lived in [Mu-97k-Client-Source](https://github.com/EmanuelCatania/Mu-97k-Client-Source), where its earlier Releases remain.
 
+## What's new in 0.97.45 — Phase 5, first part
+
+This version brings the first half of Phase 5: content shared between client
+and server, server authority and security. 0.97.50 completes it.
+
+- **Encrypted channel.** Traffic between the client and the GameServer, and also
+  with the ConnectServer, is encrypted and authenticated (XChaCha20-Poly1305
+  with X25519 keys signed with Ed25519). Each server has its own identity in
+  `Data/Keys/ServerIdentity.key`, which the GameServer generates by itself the
+  first time; the client remembers each server's public key and also uses it to
+  verify the catalog. See [Server identity](docs/identidad-del-server.md).
+- **The client is organized by content.** `Data/` becomes `Content/` (one folder
+  per item, monster, NPC, set, map and effect, each with its own `.toml`) and
+  `System/` (the minimum needed to start). The player's settings, cache and logs
+  go to `User/`. Player packs go in `Packs/`, and the `-hd` and `-uhd` versions
+  of a texture sit next to the classic one. The client now ships a ×2 HD texture
+  pack. An old installation is moved over with `client/tools/migrar_data.py`
+  (see below).
+- **Client content from the server.** On the logo screen, the client compares
+  its `.toml` files with the ones in the server's `Data/ClientContent` and
+  downloads the ones that differ. If the ConnectServer does not answer, it keeps
+  what it has.
+- **More data in the catalog:** gates, mana, AG and range of skills, item
+  stacking and prices, the `/move` list and music per map. The client keeps a
+  cache and the server only sends what changed.
+- **Server data in TOML.** Per map in `Data/Maps/NN-Name/` (`Map.toml`,
+  `Zones.toml`, `Gates.toml`, `Spawns.toml`, `Drops.toml`), items per section in
+  `Data/Items/` and invasions in `Data/Events/Invasions/`. The usual `.txt`
+  files are still read when the TOML files are missing. Spawns are hot-reloaded
+  only on the maps that changed.
+- **Server authority:** movement budget, attack speed and auto-potion checks, a
+  packets-per-second cap per connection, optional line of sight for area
+  skills, explicit rejections the client displays, `AllowableIpList` on Linux
+  too and escaped SQL queries.
+- **Richer packets:** monster life, expanded CharSet for custom items, stats in
+  a single block, details of your own buffs (the C panel shows what each one
+  adds), event schedules and the attack speed of other players.
+- **GM and administrator sign** above the head, based on the level in
+  `Util/GameMaster.txt`: 1 is GM and 2 or more is administrator.
+- **Elf summons:** scaling, +7 to +10 orbs and a panel in the admin.
+- **Web panel:** per-map editor, with spawns in visual and text mode.
+- **Fonts:** `.ttc` collections, system CJK fonts and simulated bold when the
+  family has none.
+- **Release builds without test tools.** `debug.log` and `fonts.log` live in
+  `User/` and are deleted on exit if the session had no errors, like the
+  original `MuError.log`.
+- Fixes: Atlans fish, a long name overwrote the character class on x64, arrow
+  auto-equip left a ghost pack, pickup with a full inventory, position after a
+  `/move`, the close button of the guild panel and the Arena Guard at the
+  stadium entrance.
+
+**Compatibility: server 0.97.45 ↔ client 0.97.45.** The protocol moved to
+version 13 and is negotiated on connect: with a client or server of another
+version, login shows *"wrong version"*. Update both together.
+
+### Upgrading from 0.97.43
+
+The database does not change.
+
+1. **Images.** With the published images compose:
+
+   ```bash
+   docker compose -f docker-compose.images.yml pull mu-server mu-web mu-editor
+   docker compose -f docker-compose.images.yml up -d
+   ```
+
+   To pin the version, use the images tagged `0.97.45`.
+2. **Volumes.** You don't need to touch them for the server to work: everything
+   new is optional and what is missing keeps the old values. From this
+   version's files you can merge:
+   - `GameServer/DATA/GameServerInfo - Common.dat`: the authority checks
+     (`MoveCheck=2` with `MoveCheckBudget` and `MoveCheckTileTime`,
+     `CheckSpeedHack=1`, `CheckAutoPotionHack=1`, `AttackCheck=2`,
+     `SkillLineCheck`, `PacketRateCheck` and `PacketRateMax`). The values in the
+     file were measured against the client.
+   - `Data/Maps/`, `Data/Items/` and `Data/Events/Invasions/`: the data in TOML.
+     To move yours without losing changes, generate them from your `.txt` files
+     with `mu-data import-maps`, `import-zones`, `import-gates`,
+     `import-spawns`, `import-drops`, `import-items` and `import-invasions`, and
+     review them with the matching `check-` command.
+   - `Data/ClientContent/`: only if you want to hand out client `.toml` files
+     from the server. See `Data/ClientContent/LEEME.md`.
+   - `Data/Text/*/Client.txt`: new client texts.
+   - `Data/Skill/Skill.txt`: elf summons 37 to 40.
+3. **Client.** Build it from `client/` with your address and options, as usual
+   (see the [client README](client/README.en.md)). The new client no longer
+   ships `Data/`, but `Content/` and `System/`. If you had distributed a client
+   with `Data/` and your own changes inside it, put that `Data/` next to
+   `main.exe` in the new client folder and run
+   `python client/tools/migrar_data.py --cliente <that folder>`: without other
+   options it shows what it would do, and with `--aplicar` it does it. Whatever
+   matches an official version is deleted, and what you changed moves to
+   `Packs/datos-anteriores/`, which the client keeps reading. Without migrating,
+   an old `Data/` is still read as the last layer, for compatibility.
+
+**Pterodactyl:** select `0.97.45` in `MU_RELEASE_TAG`. The runtime image does
+not change. With the server stopped, extract your architecture's archive into a
+temporary folder, replace the binaries (`ConnectServer`, `JoinServer`,
+`DataServer`, `GameServer`, `mu-data`, `mu-trace`) and `start.sh`, and keep your
+`Data/` and INI files.
+
+## What's new in 0.97.43
+
+- **UTF-8 translated texts.** The `.bmd` files in `Data/Local` were always
+  converted from Windows-1252, so a UTF-8 translation (Chinese, for example)
+  came out broken. UTF-8 is now kept (#48).
+- **Passwords with bcrypt.** New accounts and changed passwords are stored with
+  bcrypt; old ones are converted on the next login. `GlobalPassword` ships
+  empty (disabled).
+- **More server checks:** NPC windows, repairing, dropping items and confirming
+  a trade require being close; the client's path and the normal attack interval
+  are validated, in observe mode.
+- **Spawns per map (optional)** in `Data/Maps/NN-Name/Spawns.toml`, with
+  invasions in `Data/Events/Invasions/Spawns.toml`, editable from the panel.
+- **Invasions:** a chat notice for each monster killed, live monsters per map in
+  the events panel (H) and the golden monsters' bags fixed.
+- **Emotes** from 5.2 and `/fortnite`, with sound; **`mu-trace`** to inspect the
+  GameServer's packets and decisions (Linux); **MinGW** for the server and the
+  client.
+
+**Compatibility:** the protocol does not change; older clients get in. The
+`memb__pwd` column grows to 60 bytes (`Migrate-password-hash.sql` or the panel).
+
+## What's new in 0.97.42
+
+- **Server exploits:** zen duplication in trade, the Chaos Machine without its
+  NPC or with flag 5, walking with items loaded in the machine and kicking
+  members of another guild.
+- **Area skills without a target cap.** Evil Spirit, Triple Shot, Twisting
+  Slash, Rageful Blow, Death Stab, Power Slash and Fire Slash hit everything in
+  their radius, not the first 10 on the list. Monster area attacks stay at 5
+  players.
+- **`/makemob` mobs:** when they die they no longer fill nearby players' target
+  lists for 30 minutes.
+- **Client:** bigger effect, joint, particle and sprite pools; with many
+  monsters on screen, attacks stopped showing.
+
+**Compatibility:** the protocol does not change. Hitting more than 5 targets per
+packet needs the 0.97.42 client.
+
+## What's new in 0.97.41
+
+First monorepo Release: client and server ship from the same repository.
+
+- **WebGPU:** with 100 characters casting skills, the client goes from 40 to
+  about 80 FPS (item glow on the GPU, indexed draw data and its own staging
+  buffer).
+- **Graphics errors** in `debug.log` with a fixed code (`[WGPU-E1]` to
+  `[WGPU-L2]`); `GraphicsValidation=1` in `[Window]` to report them.
+- **Web panel** without known vulnerabilities (15 alerts closed) and on
+  **Node 24**.
+- **Compose:** on a fresh install, the database was left without tables.
+
+**Compatibility:** with the 0.97.40 server; the protocol does not change.
+
 ## What's new in 0.97.40 — Phase 4 completed
 
 - **UTF-8 text end to end.** The server no longer converts to Windows-1252:
@@ -160,7 +315,7 @@ To pin the version, use the `emapupi/mu-linux-97k:0.97.30` image (amd64 and arm6
 5. In `server/MuServer/ConnectServer/ServerList.dat`, set the server IP (`127.0.0.1` to test on the same PC).
 6. Start them in this order: DataServer, JoinServer, ConnectServer and GameServer.
 
-The `0.97.40` client has the address `mu.server-pups.space` compiled in. To point it at your own server without rebuilding, add the line `127.0.0.1 mu.server-pups.space` to `C:\Windows\System32\drivers\etc\hosts` (as administrator), and remove it when you are done.
+The client has the address `mu.server-pups.space` compiled in. To point it at your own server without rebuilding, add the line `127.0.0.1 mu.server-pups.space` to `C:\Windows\System32\drivers\etc\hosts` (as administrator), and remove it when you are done.
 
 #### Windows x86 and dependencies
 
@@ -197,7 +352,7 @@ GM level 1 or higher only, through in-game chat:
 | `/bcstart` | Blood Castle, all levels |
 | `/dsstart` | Devil Square, all levels |
 | `/bingostart` | Golden Archer Bingo |
-| `/invasionstart <index>` | Index in `server/MuServer/Data/Event/InvasionManager.dat` |
+| `/invasionstart <index>` | The invasion `index` in `server/MuServer/Data/Events/Invasions/Invasions.toml` (or, on a server without that file, the index in `Event/InvasionManager.dat`) |
 
 These schedule a single occurrence roughly two minutes later, without editing configured schedules or resetting active events. BC/DS also reject requests while entry is open. Starting an invasion does not reset other invasions. The event must be enabled. New commands record the request and result in `COMMAND_LOG`.
 
@@ -263,13 +418,14 @@ Install matching assets in client 0.97.20 too. Restart the server and check `[Co
 
 The server owns the definitions; the client only needs `.bmd` models and their textures. The source-based client does not require regenerating `item.bmd` or `ClientInfo.bmd`.
 
-1. Add the item row to its section in `Data/Item/Item.txt`. For indices 32..511, specify the classic item to imitate in **Behavior** (for example `00,020`), followed by the folder, model and RGB glow. Copy a complete row from the section and adjust its stats; do not use an abbreviated row containing `...`.
-2. For classic customs, keep model/glow definitions in `Data/Custom/Encoder/CustomItem.txt` and `CustomGlow.txt`, along with the other included Encoder tables.
-3. Optionally create `Data/Custom/Items/<section>_<index>.json` with `item`, `effects`, `inventory` and/or `tooltip`. See `03_000.json` and `13_400.json` for working examples.
-4. For a custom pet, add `Data/Custom/Pets/<section>_<index>.json`. Rudolph uses `13,400`, slot 8 and behavior `*`, with movement and zen pickup definitions. The client animates the pet; the server authorizes and executes pickup.
-5. Distribute model assets to the client, restart the server and log in again to receive the catalog. With GM permissions, test Rudolph using `/make 13 400`.
+1. Add the item row to its section in `Data/Item/Item.txt`. For indices 32..511, specify the classic item to imitate in **Behavior** (for example `00,020`). Copy a complete row from the section and adjust its stats; do not use an abbreviated row containing `...`.
+2. Everything else about the item (model, glow, bow, wing, pose, effects, tooltip, pet, stacking and price) goes in `Data/Items/NN-section.toml`, in a table named by its index: `[020]` is item `0,20`. Each file's header lists the keys; `13-helpers.toml` has the full Rudolph example (`13,400`).
+3. The model goes in the client, in the item's folder: `Data/Item/NN-section/III/` (the `.bmd` and its textures). With `model = { name = "..." }` the server looks for it there.
+4. Check with `mu-data validate /opt/mu/Data`, restart the server and log in again to receive the catalog. With GM permissions, test Rudolph using `/make 13 400`.
 
-See the [complete examples and client asset paths](https://github.com/EmanuelCatania/Mu-97k-Client-Source/blob/0.97.20/README.md#cómo-agregar-items-custom).
+A server with the old files (`Custom/Encoder`, `CustomWing.txt`, `ItemStack.txt`, `ItemValue.txt`, `Custom/Items` and `Custom/Pets`) keeps reading them as long as `Data/Items` has no section file. To move them to the new format: `mu-data import-items /opt/mu/Data` and `mu-data check-items /opt/mu/Data`.
+
+See the [complete examples and client asset paths](client/README.en.md#how-to-add-custom-items).
 
 ## Base and reference
 
@@ -286,6 +442,12 @@ Based on Kayito's sources.
 
 - `emapupi/mu-linux-97k` (server), `emapupi/mu-linux-97k-web` (web).
 - `emapupi/mu-linux-97k-mu-editor` (editor API), `emapupi/mu-linux-97k-mysql` (MySQL/init).
+
+They are published automatically when a GitHub Release is published
+(`.github/workflows/release.yml`): amd64 and arm64, with the Release tag and
+`latest`. The same workflow attaches the Pterodactyl files to the Release and updates each
+image's overview from `.github/dockerhub/`. It can
+be re-run for a tag from *Actions > Release > Run workflow*.
 
 ## Update 1 (2026-02-20)
 
@@ -319,7 +481,7 @@ The DLL injection-based client is fully deprecated and has been removed from thi
    docker compose up -d --build
    ```
 
-3. Open `44405/tcp` and `55901/tcp`.
+3. Open `44405/tcp` and `55901/tcp`. To limit connections per IP in the host firewall, see [docs/firewall.md](docs/firewall.md) (in Spanish).
 
 For published images without a build:
 

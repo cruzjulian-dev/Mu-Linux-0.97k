@@ -1,0 +1,4 @@
+# Modelos y texturas de Data/Player que el 0.97k no carga: el Dark Lord
+# (Class05) con sus texturas, y cuerpos y alas de versiones posteriores.
+# Siguen registrados para que el contenido custom pueda usarlos.
+source = "Player"

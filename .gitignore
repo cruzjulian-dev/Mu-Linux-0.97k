@@ -4,6 +4,7 @@ web/_template/
 node_modules/
 
 /server/out/
+/server/build/
 /server/Source/MuServer/bin/
 
 # Ajustes locales de cada instalación (puertos, proxy); Compose los carga solo.
@@ -11,5 +12,8 @@ docker-compose.override.yml
 
 # Audios de los emotes: son de terceros (Epic Games), no se redistribuyen.
 # El README.md de la carpeta si se versiona; explica como agregarlos.
-client/bin/Client/Data/Sound/Dances/*
-!client/bin/Client/Data/Sound/Dances/README.md
+client/bin/Client/Content/audio/sound/Dances/*
+!client/bin/Client/Content/audio/sound/Dances/README.md
+
+# Credenciales locales.
+.env

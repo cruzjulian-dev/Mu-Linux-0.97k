@@ -36,6 +36,40 @@ trade, chat, party, guild, combate, skills, efectos, eventos, sonido y música.
 | Linux x64 | OpenGL 3.3 y WebGPU (Vulkan) | Completo; es el build publicado |
 | Windows x86, Linux x86 | OpenGL 3.3 | Base histórica: compila, pero no se prueba ni recibe WebGPU |
 
+### Novedades de 0.97.45 — Fase 5, primera parte
+
+- **Contenido por entidad.** `Data/` pasa a `Content/` (una carpeta por item,
+  monstruo, NPC, set, mapa y efecto, con su `.toml`) y `System/` (lo mínimo para
+  arrancar); la configuración, la caché y los logs del jugador van a `User/`.
+  Ver [Capas de datos](#capas-de-datos). Un cliente viejo con `Data/` se pasa al
+  orden nuevo con `tools/migrar_data.py`.
+- **Pack HD.** El cliente trae un pack de texturas ×2 (`HDTextures = 1`). Ver
+  [Pack HD](#pack-hd).
+- **Canal cifrado** con el GameServer y con el ConnectServer, autenticado con la
+  identidad de cada server, que el cliente recuerda en `User/Cache/`.
+- **Contenido desde el server.** En la pantalla del logo, el cliente baja del
+  ConnectServer los `.toml` que no coinciden con los suyos. Si el server no
+  responde, sigue con lo que tiene.
+- **Catálogo:** gates, maná, AG y rango de los skills, apilado y precios de
+  items, lista de `/move` y música por mapa llegan del server, con caché en el
+  cliente.
+- **Datos en tablas.** Modelos de monstruos, items, personaje y skills, texturas
+  de la interfaz, sonidos y las cargas de cada mapa salen de `.toml`; el
+  dispatcher de red es una tabla y el código está ordenado por capas
+  (`src/app`, `assets`, `audio`, `game`, `net`, `platform`, `render`, `rhi`,
+  `scenes`, `ui`).
+- **Del server:** vida de los monstruos, detalle de los buffs propios (el panel
+  C muestra lo que suma cada uno), velocidad de ataque de los demás jugadores,
+  rechazos explícitos y el signo de GM y administrador sobre la cabeza.
+- **Fuentes:** colecciones `.ttc`, fuentes CJK del sistema y negrita simulada.
+- **Release sin herramientas de prueba:** F9 (benchmark) y F12 (FPS y perfil de
+  render) sólo en Debug o con `-DMU_BENCHMARK=ON`. `debug.log` y `fonts.log` van
+  a `User/` y se borran al salir si no hubo errores.
+
+**Compatibilidad: cliente 0.97.45 ↔ [server 0.97.45](../README.md).** El
+protocolo pasó a la versión 13 y se negocia al conectar: con un server de otra
+versión, el login muestra *"versión incorrecta"*.
+
 ### Novedades de 0.97.40 — cierre de la Fase 4
 
 - **64 bits.** El cliente se compila y se publica en x64. Los layouts de 32 bits
@@ -73,13 +107,14 @@ server 0.97.40 y al revés.
 
 ## Qué necesitás
 
-- **Los assets ya están incluidos** en `bin/Client/Data/` (~209 MB: modelos
-  `.bmd`, texturas `.ozj`/`.ozt`, mapas, sonidos, música y las fuentes de
-  respaldo). Clonás, compilás y arranca.
+- **Los assets ya están incluidos** en `bin/Client/Content/` y
+  `bin/Client/System/` (~375 MB con el pack HD: modelos `.bmd`, texturas
+  `.ozj`/`.ozt`, mapas, sonidos, música y las fuentes de respaldo). Clonás,
+  compilás y arranca.
 - **Una placa de video con OpenGL 3.3**, con el controlador instalado. Para WebGPU hace falta además DirectX 12,
   DirectX 11 o Vulkan; si no se puede crear el dispositivo, el cliente sigue con
   OpenGL.
-- **Un servidor 0.97.40.** El port está validado contra
+- **Un servidor 0.97.45.** El port está validado contra
   [MuEmu - Linux](../README.md) (season
   0.97k), que es la fuente autoritativa para el formato de los paquetes. Cada
   Release del cliente indica con qué versión del server funciona. Los servers
@@ -266,7 +301,9 @@ mirar: comparala con el `CustomerName` del server.
 
 Las preferencias se leen de **`Config.ini`**, con las mismas secciones y claves
 que usaba el `Main.dll` de inyección, así sirve el `Config.ini` que ya tengas.
-En Windows está en `bin/Client/Config.ini`; en Linux, en
+En Windows está en `bin/Client/User/Config.ini` (el `Config.ini` de al lado del exe
+es la plantilla que se copia ahí en el primer arranque; `Macro.txt`, `Cache/`,
+`Screenshots/` y `debug.log` también van en `User/`); en Linux, en
 `~/.local/share/mu97k/Config.ini`. La mayoría también se cambia desde el menú de
 opciones del juego, que las guarda en el mismo archivo.
 
@@ -412,7 +449,7 @@ valores por defecto se ve como el 0.97k. Se cambian desde el mismo submenú, **O
 | `Shadows` | `0` sombra plana del original, `1` suaves, `2` fuertes | Sombras proyectadas con mapa de sombras. |
 | `DepthFog` | `0` / `1` | Niebla por profundidad con la cámara 3D. |
 | `DrawDistance` | `0` a `3` (×1, ×1,5, ×2, ×3) | Alcance de dibujado con la cámara 3D. Lejos sólo se dibuja el terreno. |
-| `HDTextures` | `0` / `1` | Usa el pack HD de `Data/HD/` si está (ver [Pack HD](#pack-hd)). No viene en el repo; se aplica al reiniciar. |
+| `HDTextures` | `0` / `1` | Usa las versiones `-hd` que estén al lado de los archivos (ver [Pack HD](#pack-hd)). El repo trae un pack de texturas ×2; se aplica al reiniciar. |
 
 La **cámara 3D** (tecla **F10**, **F11** la vuelve a la normal) es la del DLL de
 inyección. La distancia de dibujado y la niebla por profundidad sólo se aplican
@@ -422,24 +459,65 @@ reemplaza la niebla por profundidad.
 
 ### Pack HD
 
-Con `HDTextures=1` el cliente lee `Data/HD/` además de `Data/`, sin reemplazar
-ningún archivo original. Acepta dos tipos de contenido, que se pueden combinar:
+Las versiones de alta definición van **al lado del archivo clásico**, en la
+misma carpeta y con el mismo formato, con el sufijo `-hd` antes de la extensión:
 
-- **Texturas ampliadas.** `Data/X/nombre.OZJ` se toma de
-  `Data/HD/X/nombre.ozj.jpg` (o `.ozj.png`) y `Data/X/nombre.OZT` de
-  `Data/HD/X/nombre.ozt.png`, si existen y miden un múltiplo entero del original.
-  Los UV del modelo no cambian.
-- **Archivos con el mismo nombre.** Antes de abrir `Data/X/archivo`, el cliente
-  busca `Data/HD/X/archivo`: un modelo (`Player/ArmorMale04.bmd`) o una textura
-  (`.OZJ`/`.OZT`) en el formato de siempre. Así entra un pack de modelos rehechos
-  con sus propias texturas, copiado tal cual en `Data/HD/` en lugar de pisar
-  `Data/`. Las texturas que pide un modelo se buscan con la misma regla, así que
-  las que sólo trae el pack también se encuentran.
+- **Texturas.** `Data/Object1/casa.OZJ` → `casa-hd.OZJ`, y lo mismo con `.OZT`. Son la misma imagen ampliada un múltiplo entero (×2, ×4…),
+  así los UV del modelo no cambian; si no mide un múltiplo entero se ignora. Se
+  carga la clásica y la HD la reemplaza unos frames después.
+- **Modelos.** `Data/Player/ArmorMale04.bmd` → `ArmorMale04-hd.bmd`. Un modelo
+  rehecho puede pedir texturas propias: van al lado con su nombre normal y a su
+  vez pueden tener su `-hd`.
 
-Con la opción apagada `Data/HD` se ignora y se ve el original. Es sólo visual:
-el server no se entera. El [Release 0.97.40](https://github.com/EmanuelCatania/Mu-97k-Client-Source/releases/tag/0.97.40) trae un pack de ejemplo
-(`mu97k-0.97.40-pack-hd-ejemplo.zip`), con unas 1.850 texturas ampliadas al
-doble con IA para mostrar cómo funciona; se descomprime en la carpeta del cliente.
+Se activan con `HDTextures = 1`; con `0` no se busca ningún archivo extra.
+Desde 0.97.45 el cliente trae un pack de texturas ×2 en `Content/` (unas
+1800 texturas `-hd` de mapas, items, efectos e interfaz, ~90 MB).
+Es sólo visual: el server no se entera.
+
+### Capas de datos
+
+El código pide los archivos con rutas `Data/...` (el orden original del 0.97k).
+`Data` ya no es una carpeta: el cliente busca cada archivo en estas carpetas al
+lado de `main.exe`, en este orden (la primera que lo tenga gana):
+
+1. `Servers/<ip>_<puerto>/`: contenido del server al que estás conectado.
+2. `Packs/<nombre>/`: packs opcionales del jugador, en orden alfabético.
+3. `Content/`: contenido del juego en el orden nuevo.
+4. `System/`: lo mínimo para arrancar (fuentes, claves de red, plantilla de
+   macros). Una instalación vieja con `Data/` todavía se lee como esta capa;
+   `tools/migrar_data.py` la pasa al orden nuevo.
+
+Las cuatro reflejan el interior de `Data`: `Packs/MiPack/Object8/casa.OZJ`
+reemplaza a `Data/Object8/casa.OZJ`. `Content/alias.toml` traduce carpetas
+viejas a las nuevas (`"Object8" = "map/atlans/objects"`). Una versión `-hd`
+sólo se usa si está en la misma capa que el clásico o en una que gane: así un
+pack puede traer sólo `-hd`, pero el `-hd` de `Data` no pisa lo que reemplazó
+un pack. Las capas se leen al arrancar y quedan en `User/debug.log`.
+
+Items, monstruos, NPCs y sets ya están por entidad: cada uno es una carpeta
+(`Content/item/00-swords/000/`, `Content/monster/01-BullFighter/`, `Content/npc/251-HanzoTheBlacksmith/`,
+`Content/set/01-Dragon/`) con su modelo, sus texturas y un `.toml` del tipo
+(`item.toml`, `monster.toml`, `npc.toml`, `set.toml`) que dice qué carpeta de Data reemplaza (`source`). El esqueleto, los
+cuerpos por clase, alas y helpers están en `Content/player/base/`.
+Al arrancar, cada archivo de esas carpetas pasa a responder por
+`Data/<source>/<archivo>`, así que no hace falta escribir alias a mano.
+
+El resto de `Content/`:
+
+- `text/<idioma>/` (`spn`, `eng`, `por`, `kor`): `Text.bmd`, `Dialog.bmd` y
+  `NPCName.txt` de cada idioma, sin sufijo en el nombre. `text/filter/` tiene
+  los filtros de palabras del chat y de nombres.
+- Las tablas van con su tema: `item/item.bmd`, `skill/skill.bmd`, `map/Gate.bmd`
+  y `quest/quest.bmd`. Las tres primeras son además el respaldo de lo que manda
+  el server en el catálogo.
+- `audio/sound/<tipo>/`: los sonidos separados en `ambient`, `effect`,
+  `interface`, `monster`, `npc`, `player` y `skill`.
+- `monster/unused/`, `npc/unused/`, `player/unused/` e `item/unused/`:
+  modelos y texturas que el 0.97k no carga, de versiones posteriores (los
+  monstruos, por el mapa de 5.2 que los crea: Kalima, Aida, Castle Siege,
+  Crywolf...; en `player/unused/` el Dark Lord y en `item/unused/` sus
+  items, los anillos y collares elementales, Kundun...). Siguen registrados,
+  así que quedan disponibles para contenido custom.
 
 ---
 
@@ -470,10 +548,10 @@ El texto pasa por HarfBuzz (forma de los caracteres, ligaduras), SheenBidi
 (escrituras de derecha a izquierda, como árabe y hebreo) y libunibreak (dónde se
 puede cortar una línea en chat, burbujas y diálogos). Lo que la fuente elegida
 no tiene se busca, carácter por carácter, en las fuentes de respaldo de
-`bin/Client/Data/Font/` (chino, japonés, coreano, árabe, hebreo, tailandés,
+`bin/Client/System/Font/` (chino, japonés, coreano, árabe, hebreo, tailandés,
 devanagari y emoji) y después en las del sistema. Se pueden agregar más `.ttf` u
 `.otf` a esa carpeta; el detalle está en
-[`Respaldo-README.md`](bin/Client/Data/Font/Respaldo-README.md).
+[`Respaldo-README.md`](bin/Client/System/Font/Respaldo-README.md).
 
 `[Font]` en `Config.ini` elige la fuente principal, el tamaño, el suavizado
 (`FontQuality`), una sombra (`TextShadow=1`) y un contorno (`TextOutline=1`);
@@ -519,12 +597,24 @@ item se veía mal o el server lo rechazaba.
 
 Ahora **el server es la única fuente**. Al loguearse, le manda al cliente un
 catálogo con todas las definiciones (items, monstruos, efectos, pets). El
-cliente **sólo necesita los archivos del modelo** (`.bmd` y texturas) dentro de
-`bin/Client/Data`. No hay que regenerar `item.bmd` ni tocar código.
+cliente **sólo necesita los archivos del modelo** (`.bmd` y texturas). No hay
+que regenerar `item.bmd` ni tocar código.
 
-Los `.txt` del `Encoder` del DLL se siguen leyendo desde
-`Data/Custom/Encoder` del server, así que una carpeta de customs armada para el
-DLL funciona sin convertir nada.
+En el server, un item tiene dos lugares:
+
+| Dónde | Qué va |
+|---|---|
+| `Data/Item/Item.txt` | la fila del item: nombre, stats, clases, tamaño y slot |
+| `Data/Items/NN-sección.toml` | todo lo demás: modelo, brillo, arco, ala, pose, efectos, tooltip, pet, apilado y precio |
+
+Hay un archivo por sección (`00-swords.toml`, `13-helpers.toml`, …) y adentro
+una tabla por item, con su índice: `[020]` es el item `0,20`. Sólo tienen tabla
+los items que llevan algo más que su fila de `Item.txt`. El encabezado de cada
+archivo lista todas las claves.
+
+En el cliente, el modelo de un item va en **la carpeta del item**:
+`bin/Client/Data/Item/NN-sección/III/` (el `.bmd` y sus texturas juntos). Así,
+agregar un item es crear esa carpeta con su número y poner el modelo adentro.
 
 ### Índices: el rango clásico y el extendido
 
@@ -533,27 +623,24 @@ Cada sección de items (espadas, hachas, …, joyas) tiene en el 0.97k **32
 items *agregados*. En el protocolo viajan con 13 bits (el item usa 7 bytes en
 vez de 5), así que entran sin pisar ningún item vanilla.
 
-Un agregado necesita decir **qué item vanilla imita** (columna *Comportamiento*):
-eso decide la lógica que el 0.97k tiene escrita por tipo de item (si es un arco
-y gasta flechas, si es un ala, si es una joya, qué opciones excellent puede
-tener). Todo lo demás —nombre, stats, tamaño, modelo, brillo, efectos— sale de
-su propia fila.
+Un agregado necesita decir **qué item vanilla imita** (columna *Comportamiento*
+de `Item.txt`): eso decide la lógica que el 0.97k tiene escrita por tipo de item
+(si es un arco y gasta flechas, si es un ala, si es una joya, qué opciones
+excellent puede tener). Todo lo demás sale de su propia fila y de su tabla.
 
-### Ejemplo 1: la Knight Blade, como se hacía con el DLL
+### Ejemplo 1: la Knight Blade con otro modelo
 
-El item está dentro del rango clásico (`0,20`); el modelo y el brillo se
-definen en el `Encoder`:
+El item está dentro del rango clásico (`0,20`):
 
-```
-// Data/Custom/Encoder/CustomItem.txt
-00,020		22		"Sword21"		// Knight Blade
-
-// Data/Custom/Encoder/CustomGlow.txt
-00,020		191	165	127		// Knight Blade
+```toml
+# Data/Items/00-swords.toml
+[020]
+model = { name = "Sword21" }
+glow = [191, 165, 127]
 ```
 
-Assets en el cliente: `bin/Client/Data/Item/Custom/20/` (`sword21.bmd` y sus
-texturas).
+Assets en el cliente: `bin/Client/Data/Item/00-swords/020/` (`sword21.bmd` y
+sus texturas). Sin `folder`, el modelo se busca en esa carpeta.
 
 ### Ejemplo 2: la Crimson Knight Blade, fuera del rango clásico
 
@@ -562,7 +649,7 @@ El mismo modelo como item agregado (`0,32`), todo en una fila de
 comportamiento, carpeta y nombre del modelo, y el color del brillo (RGB):
 
 ```
-32	0	22	1	4	1	1	0	"Crimson Knight Blade"	...	00,020	"Item\Custom\20\"	"Sword21"	255	40	40
+32	0	22	1	4	1	1	0	"Crimson Knight Blade"	...	00,020	"Item\00-swords\020\"	"Sword21"	255	40	40
 ```
 
 Se comporta como la Knight Blade (`00,020`), usa el modelo `Sword21` y brilla en
@@ -570,64 +657,57 @@ rojo. Comando de prueba: `/make 0 32`.
 
 ### Ejemplo 3: el set Great Dragon
 
-Cinco piezas en el índice `21` de las secciones 7 a 11, con el modelo definido
-en el `CustomItem.txt` del `Encoder` (como en el DLL):
+Cinco piezas en el índice `21` de las secciones 7 a 11. Como las cinco
+comparten texturas, el modelo indica una carpeta propia del set:
 
-```
-07,021		0		"HelmMale22"		// Great Dragon Helm
-08,021		0		"ArmorMale22"		// Great Dragon Armor
-09,021		0		"PantMale22"		// Great Dragon Pant
-10,021		0		"GloveMale22"		// Great Dragon Glove
-11,021		0		"BootMale22"		// Great Dragon Boot
+```toml
+# Data/Items/07-helms.toml
+[021]
+model = { folder = "Player/Custom/21/", name = "HelmMale22" }
 ```
 
-Assets en el cliente: `bin/Client/Data/Player/Custom/21/`. Las mismas piezas
-también se pueden definir sin el `Encoder`, con las columnas de modelo en
-`Item.txt` (`"Player\Custom\21\" "HelmMale22"`).
+y lo mismo en `08-armors.toml`, `09-pants.toml`, `10-gloves.toml` y
+`11-boots.toml`. Assets en el cliente: `bin/Client/Data/Player/Custom/21/`.
 
 ### Ejemplo 4: efectos propios y pose en el inventario
 
-`Data/Custom/Items/<sección>_<índice>.json` agrega a un item (custom o vanilla)
-su pose en el inventario y efectos que el cliente dibuja sobre los huesos del
-modelo. Por ejemplo, unas alas con los destellos de las Wings of Illusion del
-5.2:
+`effects` agrega efectos que el cliente dibuja sobre los huesos del modelo, e
+`inventory` la pose del item en la grilla. Por ejemplo, unas alas con los
+destellos de las Wings of Illusion del 5.2:
 
-```json
-{
-  "item": "12,032",
-  "effects": [
-    { "on": "equipped", "type": "sprite", "texture": "Effect/Flare.jpg",
-      "bones": [5, 6, 7, 8, 18, 19], "color": [0.5, 0.0, 0.0], "scale": 0.6,
-      "pulse": { "speed": 0.002, "scale": 0.2, "color": 0.4 } },
-    { "on": "equipped", "type": "particle", "particle": 1230,
-      "bones": [13, 31], "chance": 2, "color": [0.8, 0.8, 0.3], "scale": 0.5 }
-  ]
-}
+```toml
+# Data/Items/12-wings.toml
+[032]
+effects = [
+	{ on = "equipped", type = "sprite", texture = "Effect/Flare.jpg", bones = [5, 6, 7, 8, 18, 19], color = [0.5, 0, 0], scale = 0.6, pulse = { speed = 0.002, scale = 0.2, color = 0.4 } },
+	{ on = "equipped", type = "particle", particle = 1230, bones = [13, 31], chance = 2, color = [0.8, 0.8, 0.3], scale = 0.5 },
+]
 ```
 
-En el repo del server hay un caso real: `Data/Custom/Items/03_000.json` corrige
-la posición del Light Spear (vanilla) en su casilla, con la corrección del 5.2.
+En el repo del server hay un caso real: `[000]` de `03-spears.toml` corrige la
+posición del Light Spear (vanilla) en su casilla, con la corrección del 5.2.
 
 ### Ejemplo 5: un pet custom (Pet Rudolph)
 
 El Rudolph del 5.2 como pet que da vueltas alrededor del jugador y levanta el
 zen cercano. Va en un índice alto (`13,400`) a propósito, para que sirva de
-ejemplo del rango extendido. Son cuatro archivos, todos incluidos en los repos:
+ejemplo del rango extendido:
 
 | Dónde | Archivo | Qué define |
 |---|---|---|
-| cliente | `bin/Client/Data/Item/Custom/Rudolph/` | el modelo `xmas_deer.bmd` y sus texturas |
+| cliente | `bin/Client/Data/Item/13-helpers/400/` | el modelo `xmas_deer.bmd` y sus texturas |
 | server | `Data/Item/Item.txt` | la fila del item: `Slot` 8 (helper), comportamiento `*` (no imita a ningún pet vanilla) y el modelo |
-| server | `Data/Custom/Items/13_400.json` | la pose en el inventario |
-| server | `Data/Custom/Pets/13_400.json` | cómo se mueve y qué hace |
+| server | `Data/Items/13-helpers.toml` | la pose, el tooltip y el pet |
 
-```json
-{
-  "item": "13,400",
-  "blendMesh": 0,
-  "movement": { "type": "orbit", "radius": 50, "period": 4000, "height": 20 },
-  "abilities": [ { "type": "pickup", "what": "zen", "range": 3, "interval": 1000, "delay": 1500 } ]
-}
+```toml
+[400]
+inventory = { position = [0, -0.05], rotation = [270, 40, 0], scale = 0.0015 }
+tooltip = [{ color = "gold", text = "Zen picker" }]
+
+[400.pet]
+abilities = [{ delay = 1500, interval = 1000, range = 3, type = "pickup", what = "zen" }]
+blendMesh = 0
+movement = { height = 20, period = 4000, radius = 50, type = "orbit" }
 ```
 
 El cliente dibuja el movimiento; las habilidades (levantar el zen) las ejecuta
@@ -653,25 +733,53 @@ Assets en el cliente: `bin/Client/Data/Monster/Karane/`.
 
 ### Referencia
 
-Columnas opcionales al final de cada fila de `Item.txt` (`*` = sin valor):
+Claves de cada item en `Data/Items/NN-sección.toml`:
+
+| Clave | Ejemplo | Qué hace |
+|---|---|---|
+| `model` | `{ name = "Sword21" }` | modelo propio; sin `folder` va en `Data/Item/NN-sección/III/` |
+| `glow` | `[255, 40, 40]` | color del brillo por nivel |
+| `bow` | `"crossbow"` | arco (`"bow"`) o ballesta custom |
+| `wing` | `{ defense = 2, inc_damage = [25, 2], dec_damage = [20, 1] }` | constantes de un ala custom (hasta 7) |
+| `inventory` | `{ position = [0, 0.05], rotation = [0, 90, 20], scale = 0.0025 }` | pose en la grilla (`scale` 0 = la vanilla) |
+| `tooltip` | `[{ text = "Zen picker", color = "gold" }]` | hasta 6 líneas propias debajo del nombre |
+| `effects` | ver el ejemplo 4 | efectos sobre los huesos |
+| `[NNN.pet]` | ver el ejemplo 5 | movimiento y habilidades de un pet (slot 8) |
+| `stack` | `255` o `[{ level = 1, max = 3, create = "14,22" }]` | apilado (sólo server) |
+| `value` | `[{ level = 0, buy = 100, sell = 20 }]` | precio de compra y venta (sólo server) |
+
+Colores del tooltip: `white`, `blue`, `red`, `gold`, `green`, `darkred`,
+`purple`, `darkblue`, `darkgold`.
+
+Columnas opcionales al final de cada fila de `Item.txt` (`*` = sin valor). Si un
+dato está en las dos partes, manda la columna de `Item.txt`:
 
 | Columna | Ejemplo | Qué hace |
 |---|---|---|
 | Comportamiento | `00,020` | vanilla que imita en la lógica |
-| Carpeta y modelo | `"Item\Custom\20\" "Sword21"` | modelo en el inventario, el suelo y el personaje |
+| Carpeta y modelo | `"Item\00-swords\020\" "Sword21"` | modelo en el inventario, el suelo y el personaje |
 | Brillo | `255 40 40` | color del brillo por nivel |
 | Carpeta y modelo puesto | `"Item\Custom\FenrirMount\" "fenril_black"` | sólo si el item se ve distinto puesto (una montura) |
 | Gate | `22` | para pergaminos: lleva siempre a ese gate |
 
-Los JSON de `Data/Custom/Items` también aceptan `"tooltip"`: hasta 6 líneas
-propias debajo del nombre del item, como texto (`"Zen picker"`) o con color
-(`{ "text": "Zen picker", "color": "gold" }`; colores: `white`, `blue`, `red`,
-`gold`, `green`, `darkred`, `purple`, `darkblue`, `darkgold`).
+`mu-data validate <Data>` revisa los archivos sin arrancar el server. Al
+arrancar, un item con errores no se aplica (ninguna de sus claves) y el motivo
+queda en `GameServer/LOG`. El panel web edita estas tablas desde el editor de
+items custom y el de precios y apilado.
 
-Para alas custom, `Data/Item/CustomWing.txt` agrega las constantes de defensa y
-daño. Los JSON de `Data/Custom/Items` y `Data/Custom/Pets` se validan al
-arrancar el server: un archivo con errores se descarta entero y el motivo queda
-en `GameServer/LOG`.
+**Servers con los archivos de antes.** Si `Data/Items` no tiene ningún archivo
+de sección, el server sigue leyendo `Custom/Encoder` (`CustomItem`,
+`CustomGlow`, `CustomBow`, `ItemPosition`), `Item/CustomWing.txt`,
+`Item/ItemStack.txt`, `Item/ItemValue.txt` y los JSON de `Custom/Items` y
+`Custom/Pets`. Para pasarlos al formato nuevo:
+
+```bash
+mu-data import-items /opt/mu/Data
+mu-data check-items /opt/mu/Data
+```
+
+`check-items` compara las dos fuentes y lista los archivos viejos que se pueden
+borrar. `MapFog.txt` y `CustomMonster.txt` siguen en `Custom/Encoder`.
 
 ---
 
@@ -813,7 +921,7 @@ La licencia cubre **el código**: todo lo que está bajo `src/`.
 Las bibliotecas de terceros mantienen sus propias licencias: stb y miniaudio
 (dominio público / MIT-0), utf8proc (MIT), libunibreak (zlib), SDL3 (zlib),
 FreeType (FreeType License), HarfBuzz (MIT), SheenBidi (Apache 2.0) y Dawn
-(BSD 3-Clause). Las fuentes de `bin/Client/Data/Font/` tienen la suya al lado
+(BSD 3-Clause). Las fuentes de `bin/Client/System/Font/` tienen la suya al lado
 (SIL OFL 1.1 o Apache 2.0). El paquete Linux incluye las licencias en
 `licenses/`.
 

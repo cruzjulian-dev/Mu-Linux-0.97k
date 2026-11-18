@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 #include <type_traits>
 using undefined4=std::uint32_t; using std::uintptr_t;
@@ -24,6 +30,9 @@ template<class T> std::uintptr_t Address(T value) {
     else return static_cast<std::uintptr_t>(value);
 }
 static void ChatLB_ScrollBy0(int* ptr) { Require(reinterpret_cast<BYTE*>(ptr)==activeWidget); ++scrollCalls; }
+// En x64 la vtable vive en una cabecera delante del objeto; el arnes la simula con el primer
+// DWORD del widget (marcador distinto de cero = objeto construido).
+void** ChatWidget_GetVTable(void* widget) { return *static_cast<int*>(widget)?reinterpret_cast<void**>(1):nullptr; }
 '''
 
 MAIN = r'''
@@ -96,17 +105,17 @@ def harness(revision=None, legacy_function=None):
     prefix=PREAMBLE.split("char DAT_00559bb4",1)[0]+SERVICES
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
     for name in ("DAT_055c9ff0","DAT_055c9ff4","g_bUseChatListBox"):
-        prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-        prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
-    source=read_source("src/Platform/ClientEntry.cpp",revision)
+        prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+        prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
+    source=read_source("src/platform/ClientEntry.cpp",revision)
     assignments=[re.search(rf"\b{name}\s*=\s*[^;]*\b{ctor}\([^;]*;",source).group() for name,ctor in (("DAT_055c9ff0","ChatListBox_Construct"),("DAT_055c9ff4","ChatListBox_ConstructWhisper"))]
     prefix+="\nvoid Publish() {"+"".join(assignments)+"}\n"
     def body(path,name):
         selected=legacy_function[1] if legacy_function and legacy_function[0]==name else revision
         return function(read_source(path,selected),name)
-    rect=body("src/Util/Misc.cpp","Object_SetRectFields")
-    clear=body("src/Util/Misc.cpp","Object_ClearMembers")
-    resize=body("src/Core/Runtime_Externs.cpp","ChatListBox_ScrollByN")
+    rect=body("src/app/util/Misc.cpp","Object_SetRectFields")
+    clear=body("src/app/util/Misc.cpp","Object_ClearMembers")
+    resize=body("src/app/core/Runtime_Externs.cpp","ChatListBox_ScrollByN")
     clear_arg="object" if re.search(r"Object_ClearMembers\(void\s*\*",clear) else "static_cast<int>(reinterpret_cast<std::uintptr_t>(object))"
     size_arg="object" if "void* val" in resize else "static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(object))"
     return prefix+rect+clear+resize+MAIN.replace("CLEAR_ARG",clear_arg).replace("SIZE_ARG",size_arg)

@@ -9,6 +9,12 @@ from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 from LegacyEntityLayout import opaque_cloth_fields
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 std::uintptr_t Hero,CharactersClient;
 BYTE* markBase;
@@ -71,18 +77,18 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);const
 
 
 def harness(revision=None):
-    header=read_source('src/Entity/EntityTypes.h',revision);source=read_source('src/Net/Recv/Recv_Guild.cpp',revision)
+    header=read_source('src/game/entity/EntityTypes.h',revision);source=read_source('src/net/Recv/Recv_Guild.cpp',revision)
     part=re.search(r'struct PART_t\s*\{.*?\};',header,re.S).group();part=opaque_cloth_fields(part);character=header[header.index('struct CHARACTER {'):header.index('    BYTE     PK;')]
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x100000')+'\n#ifndef _WIN32\nusing WORD=std::uint16_t;\n#endif\nstruct OBJECT{BYTE Live;BYTE opaque[443];};\n'
     prefix+=part+character+'BYTE remainder[170];};\nstatic_assert(sizeof(CHARACTER)==916);static_assert(offsetof(CHARACTER,GuildMarkIndex)==474);static_assert(offsetof(CHARACTER,GuildTeam)==745);\n'
     prefix+='\n'.join(re.findall(r'^inline (?:const )?CHARACTER\* AsCharacter[^\n]+',header,re.M))
-    prefix+=re.search(r'constexpr int kGuildMarkRecordCount\s*=\s*[^;]+;',read_source('src/Net/Recv/NetRecv.h',revision)).group()
-    size=re.search(r'constexpr std::size_t kGuildNameSize\s*=\s*(\d+)',read_source('src/Net/Protocol/ProtocolBase.h',revision)).group(1)
+    prefix+=re.search(r'constexpr int kGuildMarkRecordCount\s*=\s*[^;]+;',read_source('src/net/Recv/NetRecv.h',revision)).group()
+    size=re.search(r'constexpr std::size_t kGuildNameSize\s*=\s*(\d+)',read_source('src/net/Protocol/ProtocolBase.h',revision)).group(1)
     prefix+=f'namespace NetText{{constexpr std::size_t GuildNameSize={size};}}\n'
     prefix+=re.search(r'static char s_GuildMarkName[^;]+;',source).group()+SERVICES
     gh,gd=read_source('src/globals.h',revision),read_source('src/globals.cpp',revision)
     for name in ['EnableGuildWar','GuildWarIndex','GuildWarName']:
-        prefix+=re.search(rf'extern [^;\n]*\b{name}(?:\[[^\]]*\])?\s*;',gh).group()
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}(?:\[[^\]]*\])?\s*;',gh))
         prefix+=re.search(rf'^[^/\n]*\b{name}(?:\[[^\]]*\])?\s*=\s*[^;]+;',gd,re.M).group()
     update=function(source,'GuildWar_UpdateEntityRelation');code=function(source,'GuildMark_Record')+function(source,'GuildMark_FindRecordByName')+update+function(source,'GuildWar_RefreshEntityRelations')
     arg='reinterpret_cast<uintptr_t>(entity)' if 'uintptr_t entityAddress' in update else 'static_cast<int>(reinterpret_cast<uintptr_t>(entity))'

@@ -114,3 +114,18 @@ bool CGameMaster::CheckGameMasterLevel(LPOBJ lpObj, int level)
 
 	return false;
 }
+
+int CGameMaster::GetGameMasterLevel(LPOBJ lpObj)
+{
+	int level = 0;
+
+	for (int n = 0; n < this->m_count; n++)
+	{
+		if (strcmp(this->m_GameMasterInfo[n].Account, lpObj->Account) == 0 && TextName::Equals(this->m_GameMasterInfo[n].Name, lpObj->Name) && this->m_GameMasterInfo[n].Level > level)
+		{
+			level = this->m_GameMasterInfo[n].Level;
+		}
+	}
+
+	return level;
+}

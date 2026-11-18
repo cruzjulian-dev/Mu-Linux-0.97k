@@ -54,6 +54,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
+      <AdditionalIncludeDirectories>.;..\Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
@@ -70,6 +71,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
+      <AdditionalIncludeDirectories>.;..\Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level3</WarningLevel>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <Optimization>MaxSpeed</Optimization>
@@ -93,45 +95,68 @@
     <None Include="small.ico" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="ClientContent.h" />
     <ClInclude Include="ClientManager.h" />
     <ClInclude Include="ConnectServer.h" />
     <ClInclude Include="ConnectServerProtocol.h" />
-    <ClInclude Include="Console.h" />
-    <ClInclude Include="CriticalSection.h" />
-    <ClInclude Include="IpManager.h" />
-    <ClInclude Include="Log.h" />
-    <ClInclude Include="ReadScript.h" />
-    <ClInclude Include="MiniDump.h" />
-    <ClInclude Include="ProtocolDefines.h" />
+    <ClInclude Include="..\Common\Console.h" />
+    <ClInclude Include="..\Common\CriticalSection.h" />
+    <ClInclude Include="..\Common\IpManager.h" />
+    <ClInclude Include="IpManagerServer.h" />
+    <ClInclude Include="..\Common\Log.h" />
+    <ClInclude Include="LogTypes.h" />
+    <ClInclude Include="..\Common\ReadScript.h" />
+    <ClInclude Include="..\Common\MiniDump.h" />
+    <ClInclude Include="..\Common\ProtocolDefines.h" />
     <ClInclude Include="Queue.h" />
+    <ClInclude Include="SecureLink.h" />
+    <ClInclude Include="..\Common\SecureChannel.h" />
+    <ClInclude Include="..\Common\SecureRandom.h" />
+    <ClInclude Include="..\Common\ServerIdentity.h" />
+    <ClInclude Include="..\Common\monocypher\monocypher.h" />
     <ClInclude Include="Resource.h" />
-    <ClInclude Include="ServerDisplayer.h" />
+    <ClInclude Include="..\Common\ServerDisplayer.h" />
+    <ClInclude Include="..\Common\ServerDisplayerHooks.h" />
     <ClInclude Include="ServerList.h" />
     <ClInclude Include="SocketManager.h" />
-    <ClInclude Include="SocketManagerUdp.h" />
+    <ClInclude Include="..\Common\SocketManagerUdp.h" />
+    <ClInclude Include="SocketManagerUdpServer.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="Util.h" />
+    <ClInclude Include="..\Common\UtilCommon.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="ClientContent.cpp" />
     <ClCompile Include="ClientManager.cpp" />
     <ClCompile Include="ConnectServer.cpp" />
     <ClCompile Include="ConnectServerProtocol.cpp" />
-    <ClCompile Include="Console.cpp" />
-    <ClCompile Include="CriticalSection.cpp" />
-    <ClCompile Include="IpManager.cpp" />
-    <ClCompile Include="Log.cpp" />
-    <ClCompile Include="ReadScript.cpp" />
-    <ClCompile Include="MiniDump.cpp" />
-    <ClCompile Include="Queue.cpp" />
-    <ClCompile Include="ServerDisplayer.cpp" />
+    <ClCompile Include="..\Common\Console.cpp" />
+    <ClCompile Include="..\Common\CriticalSection.cpp" />
+    <ClCompile Include="..\Common\IpManager.cpp" />
+    <ClCompile Include="..\Common\Log.cpp" />
+    <ClCompile Include="..\Common\ReadScript.cpp" />
+    <ClCompile Include="..\Common\MiniDump.cpp" />
+    <ClCompile Include="..\Common\Queue.cpp" />
+    <ClCompile Include="SecureLink.cpp" />
+    <ClCompile Include="..\Common\ServerIdentity.cpp" />
+    <ClCompile Include="..\Common\SecureChannel.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Common\monocypher\monocypher.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Common\ServerDisplayer.cpp" />
+    <ClCompile Include="ServerDisplayerServer.cpp" />
     <ClCompile Include="ServerList.cpp" />
     <ClCompile Include="SocketManager.cpp" />
-    <ClCompile Include="SocketManagerUdp.cpp" />
+    <ClCompile Include="..\Common\SocketManagerUdp.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Util.cpp" />
+    <ClCompile Include="..\Common\UtilProtocolLog.cpp" />
+    <ClCompile Include="..\Common\UtilCommon.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ConnectServer.rc" />

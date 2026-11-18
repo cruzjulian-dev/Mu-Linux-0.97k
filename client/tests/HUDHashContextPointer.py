@@ -57,12 +57,12 @@ int main(){
 '''
 
 def harness(revision=None):
-    source=read_source('src/Render/HUD_Pass1.cpp',revision)
+    source=read_source('src/render/HUD_Pass1.cpp',revision)
     body=function(source,'RenderMainFrameWindow_');start=body.index('if (CharacterMachine)');brace=body.index('{',start);end=brace+1;depth=1
     while depth:
         depth+=(body[end]=='{')-(body[end]=='}');end+=1
     block=body[start:end]
-    system=read_source('src/Core/System_Legacy.cpp',revision)
+    system=read_source('src/app/core/System_Legacy.cpp',revision)
     header=read_source('src/functions.h',revision)
     # uint conserva exactamente el tipo unsigned int de ambos contratos.
     legacy=function(system.replace('UINT __fastcall HashTable_GetIndex','uint __fastcall HashTable_GetIndex'),'HashTable_GetIndex').replace('HashTable_GetIndex','ActualLegacy')

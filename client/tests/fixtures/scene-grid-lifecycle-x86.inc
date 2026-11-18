@@ -5,8 +5,8 @@ alignas(16) char g_ObjectBucketGrid[4096];
 void* __cdecl CreateObject(int param_1, float* param_2, float* param_3, float param_4) {
 
 
-    int igx = (int)(param_2[0] * _DAT_00552d20);
-    int igy = (int)(param_2[1] * _DAT_00552d20);
+    int igx = (int)(param_2[0] * 0.000625f);
+    int igy = (int)(param_2[1] * 0.000625f);
     if (igx < 0 || igy < 0 || igx > 15 || igy > 15) return nullptr;
     BYTE  bVar4 = (BYTE)((char)igx * 0x10 + (char)igy);
     UINT  uVar2 = (UINT)bVar4;
@@ -64,7 +64,7 @@ void __cdecl Entity_GridUnlink(void *param_1_v, void* cell) {
 void __cdecl DeleteObjects(void) {
 
     for (int i = 0; i < 0x7580; i += 0xbc)
-        BMD__Release(i + DAT_05828d58);
+        BMD__Release(i + Models);
 
 
 

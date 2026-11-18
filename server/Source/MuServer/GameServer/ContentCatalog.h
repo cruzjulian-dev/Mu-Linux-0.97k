@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ProtocolDefines.h"
+#include "ItemExtras.h"
 
 // Catálogo de contenido (0.97.20): el server es la única autoridad de las
 // definiciones de items, monstruos y fog por mapa.  Se arma una vez a partir
@@ -191,6 +192,125 @@ struct CATALOG_TEXT
 	char Text[64];      // UTF-8 en NFC
 };
 
+// Gates (Fase 5): el cliente las usa para detectar que el personaje pisa una
+// entrada y pedir el teleport, y para el minimapa. Antes salían de su Gate.bmd.
+struct CATALOG_GATE
+{
+	WORD Index;
+	BYTE Flag;          // 0 destino, 1 entrada, 2 salida
+	BYTE Map;
+	BYTE X;
+	BYTE Y;
+	BYTE TX;
+	BYTE TY;
+	WORD Target;
+	BYTE Dir;
+	BYTE Reserved;
+	WORD MinLevel;      // 0 = sin mínimo
+	WORD Reserved2;
+};
+
+// Skills (Fase 5): lo que el cliente usa para decidir si puede lanzar un skill
+// y hasta dónde camina antes de hacerlo. Antes salía de su skill.bmd.
+struct CATALOG_SKILL
+{
+	WORD Index;
+	WORD Mana;
+	WORD BP;            // AG
+	BYTE Range;         // en casillas
+	BYTE Reserved;
+};
+
+// Caché del catálogo en el cliente (Fase 5).  Antes del login el cliente dice
+// qué secciones tiene guardadas de este server (F1:06); al aceptar el login el
+// server manda la lista de secciones con su hash (F3:F6), marcando cuáles puede
+// tomar de su caché, y después sólo las que cambiaron.
+#define CATALOG_CACHE_MAX 16
+
+// hash: SHA-256 truncado a 8 bytes del tamaño de registro + los registros de
+// la sección (CatalogSectionHash en Common/Sha256.h).  Lo recalcula el cliente
+// al leer su caché, así una sección editada no coincide y se vuelve a mandar.
+struct CATALOG_CACHE_ENTRY
+{
+	BYTE subh;
+	BYTE cached;        // en F3:F6: 1 = el cliente la toma de su caché
+	WORD Reserved;
+	BYTE hash[8];
+};
+
+struct PMSG_CATALOG_CACHE_RECV
+{
+	PSBMSG_HEAD header; // C1:F1:06
+	BYTE count;
+	BYTE Reserved[3];
+	CATALOG_CACHE_ENTRY entry[CATALOG_CACHE_MAX];
+};
+
+struct PMSG_CATALOG_SYNC_SEND
+{
+	PSBMSG_HEAD header; // C1:F3:F6
+	BYTE count;
+	BYTE Reserved[3];
+	CATALOG_CACHE_ENTRY entry[CATALOG_CACHE_MAX];
+};
+
+// Firma del manifiesto (Fase 5, C3).  Va justo antes del F3:F6.  El server firma
+// con su clave de identidad (ServerIdentity) la lista de secciones y hashes, así
+// el cliente sabe que el catálogo y lo que tiene en caché son de ese server.
+//
+// Mensaje firmado: CATALOG_SIGNATURE_CONTEXT + count + por cada sección del
+// F3:F6, en el mismo orden, subh (1 byte) + hash (8 bytes).  El campo `cached`
+// no entra: depende de cada cliente.
+#define CATALOG_SIGNATURE_CONTEXT "MuCatalog1"
+
+#define CATALOG_SIGNATURE_HAS_ROTATION 0x01
+
+struct PMSG_CATALOG_SIGNATURE_SEND
+{
+	PSBMSG_HEAD header; // C1:F3:FC
+	BYTE flags;         // CATALOG_SIGNATURE_*
+	BYTE Reserved[3];
+	BYTE publicKey[32];
+	BYTE signature[64];
+	// Con HAS_ROTATION: la clave anterior del server y su firma sobre la actual
+	// (SERVER_IDENTITY_ROTATION_CONTEXT + publicKey).
+	BYTE previousKey[32];
+	BYTE rotationSignature[64];
+};
+
+static_assert(sizeof(PMSG_CATALOG_SIGNATURE_SEND) == 200, "PMSG_CATALOG_SIGNATURE_SEND");
+
+// Música por mapa (Fase 5, `music` de Map.toml): sólo los mapas que la fijan.
+// Lista del menú M (Move.txt), sección F3:F5.  Antes viajaba en la lista F3:E5
+// del DLL, por personaje: el server bajaba el nivel mínimo a 2/3 para el Magic
+// Gladiator.  Ahora la lista es la misma para todos y esa regla la aplica el
+// cliente (CGate::GetMoveLevel); el server sigue validando el /move.
+#define CATALOG_MOVE_PK_FREE 0x01   // se puede mover con PK (PKLimitFree)
+
+struct CATALOG_MOVE
+{
+	BYTE Map;
+	BYTE Flags;         // CATALOG_MOVE_*
+	char Name[32];
+	WORD Reserved;
+	DWORD Money;
+	short MinLevel;     // -1 = sin mínimo
+	short MaxLevel;
+	short MinReset;
+	short MaxReset;
+	short AccountLevel;
+	WORD Reserved2;
+};
+
+static_assert(sizeof(CATALOG_MOVE) == 52, "CATALOG_MOVE");
+
+struct CATALOG_MAP_MUSIC
+{
+	BYTE Map;
+	BYTE Reserved[3];
+	char Music[28];     // nombre de Data/Music del cliente, sin extensión
+};
+
 struct PMSG_CATALOG_END_SEND
 {
 	PSBMSG_HEAD header; // C1:F3:EA
@@ -224,6 +344,14 @@ public:
 	// ItemPosition) sobre la tabla de items ya cargada, y fog por mapa.
 	void LoadLegacyItems(const char* folder);
 
+	// Fog por mapa (MapFog.txt del Encoder). LoadLegacyItems la incluye.
+	void LoadMapFog(const char* folder);
+
+	// Fase 5: los datos extra de Data/Items/NN-nombre.toml (modelo, glow, arco,
+	// pose, efectos, tooltip) sobre la tabla de items ya cargada. Reemplaza a
+	// LoadLegacyItems (salvo la fog) y a LoadItemJson.
+	void ApplyItemExtras(const std::vector<ItemExtraDef>& items);
+
 	// CustomMonster.txt sobre la tabla de monstruos ya cargada.
 	void LoadLegacyMonsters(const char* folder);
 
@@ -236,6 +364,22 @@ public:
 	void Invalidate() { this->m_Built = false; }
 
 	void Send(int aIndex);
+
+	// Sólo las gates (F3:F3), a quien ya tiene el resto del catálogo: se usa al
+	// recargar las gates.
+	void SendGates(int aIndex);
+
+	// Sólo los skills (F3:F4), al recargar Skill.txt.
+	void SendSkills(int aIndex);
+
+	// Sólo la música por mapa (F3:F7), al recargar los Map.toml.
+	void SendMapMusic(int aIndex);
+
+	// Sólo la lista de /move (F3:F5), al recargar Move.txt.
+	void SendMoveList(int aIndex);
+
+	// F1:06: secciones que el cliente tiene en caché.
+	void SetClientCache(int aIndex, const PMSG_CATALOG_CACHE_RECV* lpMsg);
 
 	const ITEM_POSE_INFO* GetPose(int index) const;
 
@@ -256,6 +400,27 @@ private:
 	std::vector<CATALOG_TOOLTIP> m_Tooltips;
 
 	std::vector<std::vector<BYTE>> m_Packets;
+
+	std::vector<std::vector<BYTE>> m_GatePackets;
+
+	std::vector<std::vector<BYTE>> m_SkillPackets;
+
+	std::vector<std::vector<BYTE>> m_MapMusicPackets;
+
+	std::vector<std::vector<BYTE>> m_MoveListPackets;
+
+	// Rango de m_Packets de cada sección y su hash (para la caché del cliente).
+	struct SectionRange
+	{
+		BYTE subh;
+		BYTE hash[8];
+		size_t begin;
+		size_t end;
+	};
+
+	std::vector<SectionRange> m_Sections;
+
+	void MarkSection(BYTE subh, size_t begin);
 
 	std::vector<CATALOG_TEXT> m_Texts[MAX_LANGUAGE];
 

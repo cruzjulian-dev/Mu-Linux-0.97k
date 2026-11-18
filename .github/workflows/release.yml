@@ -1,0 +1,174 @@
+name: Release
+# Al publicar una Release de GitHub: construye las imágenes de Docker Hub para
+# amd64 y arm64 (cada arquitectura en su runner nativo, sin emulación), las
+# publica con el tag de la Release y `latest`, y adjunta a la Release los
+# archivos de Pterodactyl (servers por arquitectura, web, eggs y SHA256SUMS).
+# Despues actualiza el overview de cada imagen en Docker Hub desde
+# .github/dockerhub/<imagen>.md ({{VERSION}} se reemplaza por el tag).
+#
+# Secrets: DOCKERHUB_USERNAME y DOCKERHUB_TOKEN. Para las imagenes alcanza un
+# token Read & Write; para los overview hace falta Read, Write, Delete (si no lo
+# tiene, ese paso falla sin afectar el resto).
+# A mano (Actions > Release > Run workflow) se puede repetir un tag ya publicado.
+on:
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de la Release (por ejemplo 0.97.45)"
+        required: true
+      latest:
+        description: "Mover también el tag latest de las imágenes"
+        type: boolean
+        default: true
+      assets:
+        description: "Adjuntar los archivos de Pterodactyl a la Release"
+        type: boolean
+        default: true
+      images:
+        description: "Construir y publicar las imagenes (apagado: solo los overview)"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  NAMESPACE: emapupi
+jobs:
+  build:
+    name: ${{ matrix.image.name }} (${{ matrix.platform.arch }})
+    if: github.event_name == 'release' || inputs.images
+    strategy:
+      fail-fast: true
+      matrix:
+        image:
+          - { name: mu-linux-97k, context: server, file: server/Dockerfile }
+          - { name: mu-linux-97k-mysql, context: server, file: server/docker/mysql/Dockerfile }
+          - { name: mu-linux-97k-web, context: web, file: web/Dockerfile }
+          - { name: mu-linux-97k-mu-editor, context: editor, file: editor/Dockerfile }
+        platform:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # Se sube sólo por digest; el job merge arma la imagen multi-arquitectura.
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          platforms: linux/${{ matrix.platform.arch }}
+          provenance: false
+          outputs: type=image,name=docker.io/${{ env.NAMESPACE }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
+      - name: Guardar el digest
+        run: |
+          mkdir -p digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v6
+        with:
+          # Doble guion: con uno solo, el patron de mu-linux-97k agarraba tambien
+          # los digests de mu-linux-97k-mysql, -web y -mu-editor.
+          name: digests--${{ matrix.image.name }}--${{ matrix.platform.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: ${{ matrix.name }} (manifiesto)
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [ mu-linux-97k, mu-linux-97k-mysql, mu-linux-97k-web, mu-linux-97k-mu-editor ]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: digests
+          pattern: digests--${{ matrix.name }}--*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publicar ${{ env.TAG }} y latest
+        env:
+          LATEST: ${{ github.event_name == 'release' && !github.event.release.prerelease || github.event_name == 'workflow_dispatch' && inputs.latest }}
+        working-directory: digests
+        run: |
+          image="docker.io/$NAMESPACE/${{ matrix.name }}"
+          tags=(-t "$image:$TAG")
+          if [ "$LATEST" = "true" ]; then tags+=(-t "$image:latest"); fi
+          docker buildx imagetools create "${tags[@]}" $(printf "$image@sha256:%s " *)
+          docker buildx imagetools inspect "$image:$TAG"
+
+  assets:
+    name: Archivos de Pterodactyl
+    needs: merge
+    if: github.event_name == 'release' || (inputs.images && inputs.assets)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      # docker create no ejecuta nada: alcanza con bajar la variante de cada
+      # arquitectura, sin emulación.
+      - name: Empaquetar
+        env:
+          VERSION: ${{ env.TAG }}
+          SERVER_IMAGE: ${{ env.NAMESPACE }}/mu-linux-97k:${{ env.TAG }}
+        run: bash pterodactyl/package-release-assets.sh
+      - name: Adjuntar a la Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/pterodactyl-release/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  overview:
+    name: Overview de ${{ matrix.image.name }}
+    needs: merge
+    # Corre aunque las imagenes no se hayan construido (images apagado).
+    if: always() && (needs.merge.result == 'success' || needs.merge.result == 'skipped')
+    # Un token sin permiso de borrado no puede editar la descripcion: avisa y
+    # sigue, la Release ya quedo publicada.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: mu-linux-97k, short: "MU Online 0.97k server for Linux: Connect, Join, Data and GameServer. amd64 and arm64." }
+          - { name: mu-linux-97k-mysql, short: "MySQL 8.4 LTS with the MU Linux 0.97k schema and init scripts. amd64 and arm64." }
+          - { name: mu-linux-97k-web, short: "MU Linux 0.97k web panel: registration, rankings, news and admin editors." }
+          - { name: mu-linux-97k-mu-editor, short: "Internal editor API for the MU Linux 0.97k web panel, with backups and snapshots." }
+          - { name: mu-linux-97k-pterodactyl, short: "Minimal Pterodactyl runtime for the MU Linux 0.97k egg. amd64 and arm64." }
+    runs-on: ubuntu-24.04
+    steps:
+      # Sin ref: en una Release es el tag; a mano, la rama del workflow (los
+      # overview pueden ser mas nuevos que el tag).
+      - uses: actions/checkout@v5
+      - name: Poner la version
+        run: |
+          mkdir -p overview
+          sed "s/{{VERSION}}/$TAG/g" ".github/dockerhub/${{ matrix.image.name }}.md" > overview/README.md
+      - uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.NAMESPACE }}/${{ matrix.image.name }}
+          short-description: ${{ matrix.image.short }}
+          readme-filepath: overview/README.md

@@ -9,6 +9,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import ROOT, build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 #include <string>
 #include <utility>
@@ -45,7 +51,7 @@ std::uint64_t Run(BYTE* memory,const std::vector<std::string>& files){
         const bool exists=file!=nullptr;const bool ok=file&&ImageCodec::Decode(file,24,ImageCodec::Format::Jpeg,256,decoded);if(file)std::fclose(file);
         if(index==9)Require(ok && decoded.width==256 && decoded.height==256 && decoded.channels==3);
         std::memset(memory,0x5a,bytes);std::memcpy(expected.data(),memory,bytes);
-        if(ok)for(int row=0;row<decoded.height;++row)for(int column=0;column<decoded.width*3;++column){const float value=static_cast<float>(decoded.pixels[(decoded.height-1-row)*decoded.width*3+column])*_DAT_00552b70;std::memcpy(expected.data()+16+(row*decoded.width*3+column)*4,&value,4);}
+        if(ok)for(int row=0;row<decoded.height;++row)for(int column=0;column<decoded.width*3;++column){const float value=static_cast<float>(decoded.pixels[(decoded.height-1-row)*decoded.width*3+column])*0.00392156886f;std::memcpy(expected.data()+16+(row*decoded.width*3+column)*4,&value,4);}
         char path[]="World1\\TerrainLight.jpg";char original[sizeof(path)];std::memcpy(original,path,sizeof(path));DAT_0055a7c4=static_cast<char>(mode);
         expectedPath=mode?std::string(DAT_0055a79c)+"World1\\TerrainLight.OZJ":std::string(DAT_0055a7a4)+path;
         opens=closes=errors=dialogs=quits=0;Load(path,reinterpret_cast<float*>(memory+16));
@@ -62,17 +68,17 @@ int main(){const auto files=MakeFiles();auto* low=static_cast<BYTE*>(Reserve(0x2
 
 
 def harness(revision=None):
-    codec='src/Render/Texture/ImageCodec.cpp'
+    codec='src/render/Texture/ImageCodec.cpp'
     if revision and read_source(codec,revision)!=read_source(codec):raise ValueError('El codec difiere de la referencia')
     prefix='#define NOMINMAX\n'+PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x100000')
     prefix+='\n#include '+json.dumps((ROOT/codec).as_posix())+'\n'+SERVICES
     header,definitions=read_source('src/globals.h',revision),read_source('src/globals.cpp',revision)
     for name in ['DAT_0055a79c','DAT_0055a7a4','DAT_00561b70','DAT_0055a7c4','_DAT_00552b70']:
-        prefix+=re.search(rf'extern [^;\n]*\b{name}(?:\[[^\]]*\])?\s*;',header).group()
-        prefix+=re.search(rf'^[^/\n]*\b{name}(?:\[[^\]]*\])?\s*=\s*[^;]+;',definitions,re.M).group()
-    code=function(read_source('src/Terrain/Terrain.cpp',revision),'OpenJpegBuffer')
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}(?:\[[^\]]*\])?\s*;',header))
+        prefix+=optional_definition(re.search(rf'^[^/\n]*\b{name}(?:\[[^\]]*\])?\s*=\s*[^;]+;',definitions,re.M))
+    code=function(read_source('src/game/terrain/Terrain.cpp',revision),'OpenJpegBuffer')
     arg='target' if 'float* dst' in code else 'static_cast<int>(reinterpret_cast<uintptr_t>(target))'
-    return prefix+'\n#define fclose TrackedClose\n'+code+'\n#undef fclose\n'+MAIN.replace('ARG',arg).replace('ASSET',json.dumps((ROOT/'bin/Client/Data/World1/TerrainLight.OZJ').as_posix()))
+    return prefix+'\n#define fclose TrackedClose\n'+code+'\n#undef fclose\n'+MAIN.replace('ARG',arg).replace('ASSET',json.dumps(__import__('data_paths').asset(ROOT,'World1/TerrainLight.OZJ').as_posix()))
 
 
 def main():

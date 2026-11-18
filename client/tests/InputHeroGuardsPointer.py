@@ -11,9 +11,10 @@ import re
 import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
+from legacy_fields import lower_names
 
 SERVICES=r'''
-void* DAT_07abf5d8;DWORD DAT_00559c84,MouseRButtonPush;int SelectedCharacter;
+void* Hero;DWORD InputEnable,MouseRButtonPush;int SelectedCharacter;
 '''
 MAIN=r'''
 std::uint64_t Run(BYTE* memory){
@@ -22,21 +23,21 @@ std::uint64_t Run(BYTE* memory){
  std::uint64_t hash=14695981039346656037ull;unsigned cases=0,coverage=0;
  for(unsigned profile=0;profile<16;++profile){
   for(unsigned i=0;i<1100;++i)memory[i]=static_cast<BYTE>(profile+i*37);
-  BYTE* hero=memory+16+(profile%2)*8;DAT_07abf5d8=hero;
-  DAT_00559c84=switches[profile%5];MouseRButtonPush=switches[(profile/3)%5];SelectedCharacter=selections[(profile/2)%6];
+  BYTE* hero=memory+16+(profile%2)*8;Hero=hero;
+  InputEnable=switches[profile%5];MouseRButtonPush=switches[(profile/3)%5];SelectedCharacter=selections[(profile/2)%6];
   BYTE expected[1100];std::memcpy(expected,memory,1100);
   for(unsigned dead=0;dead<256;++dead)for(unsigned safe=0;safe<256;++safe){
    hero[765]=static_cast<BYTE>(dead);hero[846]=static_cast<BYTE>(safe);expected[(hero-memory)+765]=static_cast<BYTE>(dead);expected[(hero-memory)+846]=static_cast<BYTE>(safe);
    const bool stop=DeadGuard(),hover=HoverGuard();
-   const bool wantedHover=DAT_00559c84!=0 && safe!=0 && SelectedCharacter!=-1 && MouseRButtonPush!=0;
-   Require(stop==(dead!=0) && hover==wantedHover && DAT_07abf5d8==hero && std::memcmp(memory,expected,1100)==0);
-   Require(DAT_00559c84==switches[profile%5] && MouseRButtonPush==switches[(profile/3)%5] && SelectedCharacter==selections[(profile/2)%6]);
+   const bool wantedHover=InputEnable!=0 && safe!=0 && SelectedCharacter!=-1 && MouseRButtonPush!=0;
+   Require(stop==(dead!=0) && hover==wantedHover && Hero==hero && std::memcmp(memory,expected,1100)==0);
+   Require(InputEnable==switches[profile%5] && MouseRButtonPush==switches[(profile/3)%5] && SelectedCharacter==selections[(profile/2)%6]);
    coverage|=stop?1u:2u;coverage|=hover?4u:8u;
    hash^=unsigned(stop)+2*unsigned(hover);hash*=1099511628211ull;++cases;
   }
  }
  // Sólo la segunda condición puede evaluarse sin héroe si su primera guarda corta.
- DAT_07abf5d8=nullptr;DAT_00559c84=0;SelectedCharacter=0;MouseRButtonPush=1;Require(!HoverGuard());
+ Hero=nullptr;InputEnable=0;SelectedCharacter=0;MouseRButtonPush=1;Require(!HoverGuard());
  Require(cases==1048576 && coverage==15);return hash;
 }
 int main(){
@@ -47,18 +48,18 @@ int main(){
 '''
 
 def condition(source,offset):
-    body=function(source,'Player_ProcessInput');matches=[]
+    body=lower_names(function(source,'Player_ProcessInput'));matches=[]
     for start in re.finditer(r'\bif\s*\(',body):
         first=start.end();end=first;depth=1
         while depth:
             depth+=(body[end]=='(')-(body[end]==')');end+=1
         expression=body[first:end-1]
-        if offset in expression and 'DAT_07abf5d8' in expression:matches.append(expression)
+        if (offset in expression or f'+ {int(offset,16)})' in expression) and 'Hero' in expression:matches.append(expression)
     if len(matches)!=1:raise ValueError(f'Condición inesperada: {offset}')
     return matches[0]
 
 def harness(revision=None):
-    source=read_source('src/Game/Player_InputTick.cpp',revision)
+    source=read_source('src/game/core/Player_InputTick.cpp',revision)
     guards='\n'.join(f'bool {name}(){{return ({condition(source,offset)});}}' for name,offset in [('DeadGuard','0x2fd'),('HoverGuard','0x34e')])
     return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES+guards+MAIN
 

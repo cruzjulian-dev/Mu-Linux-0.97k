@@ -8,6 +8,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 #include <cmath>
 struct OBJECT;
@@ -58,11 +64,11 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);const
 
 
 def harness(revision=None):
-    code=function(read_source('src/Render/Particle.cpp',revision),'Particle_PathUpdate')
+    code=function(read_source('src/render/Particle.cpp',revision),'Particle_PathUpdate')
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES
     gh,gd=read_source('src/globals.h',revision),read_source('src/globals.cpp',revision)
     for name in sorted(set(re.findall(r'_DAT_[0-9a-f]+',code))):
-        prefix+=re.search(rf'extern [^;\n]*\b{name}\s*;',gh).group();prefix+=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',gd,re.M).group()
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}\s*;',gh));prefix+=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',gd,re.M).group()
     current='OBJECT* object' in code
     obj='reinterpret_cast<OBJECT*>(object)' if current else 'static_cast<int>(reinterpret_cast<uintptr_t>(object))';table='table' if current else 'static_cast<int>(reinterpret_cast<uintptr_t>(table))'
     return prefix+code+MAIN.replace('OBJECT_ARG',obj).replace('TABLE_ARG',table)

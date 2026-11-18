@@ -10,6 +10,12 @@ from ModelReleaseLifecycle import prefix
 from ModelPostLoad import SERVICES as POST_SERVICES
 from BMDFileOracle import prepare
 from SceneObjectPointer import ROOT,read_source,function,build_and_run
+
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
 SERVICES=r'''
 #include <fstream>
 #include <iterator>
@@ -85,13 +91,13 @@ int main(){Reader reader;auto count=reader.U();unsigned successful=0;
 }
 '''
 def harness(revision=None):
- source=read_source('src/Render/BMD_Load.cpp',revision);body=function(source,'BMD__Open');needle="operator_delete(Buffer);\n    BMD__Init(thisPtr, '\\0');";assert needle in body;body=body.replace(needle,"Finish(cursor,fileSize);\n    "+needle)
- post=read_source('src/Render/BMD_Load.cpp');funcs='\n'.join(function(post,n)for n in ['BMD__FindTriangleForEdge','BMD__FindNearTriangle','BMD_CreateBoundingBox','BMD__Init']);funcs=funcs.replace('void __cdecl BMD__FindNearTriangle(', 'void __cdecl Post_FindNearTriangle(').replace('void __cdecl BMD__Init(','void __cdecl Post_Init(')
+ source=read_source('src/render/BMD_Load.cpp',revision);body=function(source,'BMD__Open');needle="operator_delete(Buffer);\n    BMD__Init(thisPtr, '\\0');";assert needle in body;body=body.replace(needle,"Finish(cursor,fileSize);\n    "+needle)
+ post=read_source('src/render/BMD_Load.cpp');funcs='\n'.join(function(post,n)for n in ['BMD__FindTriangleForEdge','BMD__FindNearTriangle','BMD_CreateBoundingBox','BMD__Init']);funcs=funcs.replace('void __cdecl BMD__FindNearTriangle(', 'void __cdecl Post_FindNearTriangle(').replace('void __cdecl BMD__Init(','void __cdecl Post_Init(')
  # El extractor puede omitir __cdecl: renombrar también esa variante.
  funcs=funcs.replace('void BMD__FindNearTriangle(', 'void Post_FindNearTriangle(').replace('void BMD__Init(','void Post_Init(')
  wrappers='\nvoid BMD__FindNearTriangle(void* p){++adjCalls;Post_FindNearTriangle(p);}\nvoid BMD__Init(void* p,char f){++initCalls;Post_Init(p,f);}\n'
- euler=function(read_source('src/Render/Render_LegacyTransforms.cpp'),'EulerToQuat');const=re.search(r'^float\s+_DAT_00552ce0\s*=\s*[^;]+;',read_source('src/globals.cpp'),re.M).group()
- code=prefix()+'\n#include "'+(ROOT/'src/Model/BMDFileTypes.h').as_posix()+'"\n'+POST_SERVICES+SERVICES+const+euler+funcs+wrappers+function(read_source('src/Render/SMD_Parser.cpp'),'BMD__Release')+body
+ euler=function(read_source('src/render/Render_LegacyTransforms.cpp'),'EulerToQuat');const=optional_definition(re.search(r'^float\s+_DAT_00552ce0\s*=\s*[^;]+;',read_source('src/globals.cpp'),re.M))
+ code=prefix()+'\n#include "'+(ROOT/'src/assets/model/BMDFileTypes.h').as_posix()+'"\n'+POST_SERVICES+SERVICES+const+euler+funcs+wrappers+function(read_source('src/render/SMD_Parser.cpp'),'BMD__Release')+body
  arg='m' if 'BMD* param_1' in body else 'static_cast<int>(reinterpret_cast<uintptr_t>(m))'
  return code+MAIN.replace('CALL_OPEN','BMD__Open('+arg+',"../samples/",name.c_str(),0)')
 def main():

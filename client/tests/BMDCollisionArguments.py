@@ -5,7 +5,7 @@ from pathlib import Path
 from MassTeleportTarget import build_and_run
 ROOT=Path(__file__).resolve().parents[1]
 def read(path,revision=None):
- return subprocess.check_output(['git','show',revision+':'+path],cwd=ROOT).decode('utf-8') if revision else (ROOT/path).read_text(encoding='utf-8')
+ return __import__('source_paths').show(ROOT, revision, path) if revision else (ROOT/path).read_text(encoding='utf-8')
 def extract(source,name):
  source=re.sub(r'//[^\n]*|/\*.*?\*/','',source,flags=re.S);m=re.search(r'(?:unsigned int|bool|int|void)\s+(?:__cdecl\s+)?'+name+r'\([^;{]*\)\s*\{',source);assert m,name;end=m.end();depth=1
  while depth:depth+=(source[end]=='{')-(source[end]=='}');end+=1
@@ -76,13 +76,13 @@ int main(){auto* model=static_cast<BYTE*>(Reserve(0x26000000));auto* meshes=stat
  std::printf("BMD collision:18144 contratos,%u rayos reales %016llx\n",rays,(unsigned long long)hash);}
 '''
 def harness(revision=None):
- math=extract(read('src/Math/Math_LegacyTransforms.cpp',revision),'FaceNormalize');point=extract(read('src/Scene/Scene_CharSelect_Nav.cpp',revision),'Collision_PointInPolygon');face=extract(read('src/Terrain/Terrain_RayCollision.cpp',revision),'CollisionDetectLineToFace').replace('CollisionDetectLineToFace(','RealFace(',1)
- caller=read('src/Scene/Scene_ObjectInteraction.cpp',revision);start=caller.index('BMD__CollisionDetectLineToMesh(');end=caller.index('))',start)+1;expression=caller[start:end]
+ math=extract(read('src/game/math/Math_LegacyTransforms.cpp',revision),'FaceNormalize');point=extract(read('src/scenes/Scene_CharSelect_Nav.cpp',revision),'Collision_PointInPolygon');face=extract(read('src/game/terrain/Terrain_RayCollision.cpp',revision),'CollisionDetectLineToFace').replace('CollisionDetectLineToFace(','RealFace(',1)
+ caller=read('src/scenes/Scene_ObjectInteraction.cpp',revision);start=caller.index('BMD__CollisionDetectLineToMesh(');end=caller.index('))',start)+1;expression=caller[start:end]
  expression=re.sub(r'(BMD__CollisionDetectLineToMesh\(\s*)model,',r'\1AsModel(model),',expression)
  wrapper='\n#if INTPTR_MAX == INT32_MAX\nbool PickingCall(void* model){return '+expression+';}\n#endif\n'
  from AnimationBonesPointer import layouts
  from ObjectLayoutContract import record
- body=extract(read('src/Render/BMD_Collision.cpp',revision),'BMD__CollisionDetectLineToMesh')
+ body=extract(read('src/render/BMD_Collision.cpp',revision),'BMD__CollisionDetectLineToMesh')
  code=re.sub(r'\b188\b','sizeof(BMD)',MAIN);code=re.sub(r'\b120\b','(3*sizeof(ClothModelMesh))',code).replace('m*40','m*sizeof(ClothModelMesh)')
  code=code.replace('Put(model,40,DWORD(reinterpret_cast<uintptr_t>(meshes)));','reinterpret_cast<BMD*>(model)->Meshs=meshes;')
  code=code.replace('Put(meshes,m*sizeof(ClothModelMesh)+28,DWORD(reinterpret_cast<uintptr_t>(triangles+m*72)));','reinterpret_cast<ClothModelMesh*>(meshes)[m].Triangles=triangles+m*72;')
@@ -96,7 +96,7 @@ def harness(revision=None):
  pre=PREAMBLE.replace('65536','1048576').replace('float vertices[3*15000*3];float& DAT_0584621c=vertices[0];','float* vertices;\n#define DAT_0584621c (*vertices)\n')
  wrapper=wrapper.replace('#if INTPTR_MAX == INT32_MAX','').replace('#endif','')
  dispatch=DISPATCH.replace('#if INTPTR_MAX == INT32_MAX','').replace('#endif','')
- return pre+layouts()+'\n#pragma pack(push,1)\n'+record(read('src/Physics/ClothTypes.h'),'ClothModelMesh')+'\n#pragma pack(pop)\n'+math+point+face+dispatch+body+wrapper+code+main
+ return pre+layouts()+'\n#pragma pack(push,1)\n'+record(read('src/game/physics/ClothTypes.h'),'ClothModelMesh')+'\n#pragma pack(pop)\n'+math+point+face+dispatch+body+wrapper+code+main
 
 def main():
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--architecture',choices=('Win32','x64'),default='Win32' if os.name=='nt' else 'x64');p.add_argument('--generator');p.add_argument('--reject-reference');args=p.parse_args()

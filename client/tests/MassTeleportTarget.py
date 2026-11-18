@@ -45,13 +45,14 @@ using BYTE=std::uint8_t;using WORD=std::uint16_t;using DWORD=std::uint32_t;
 using uintptr_t=std::uintptr_t;
 void Require(bool ok){if(!ok){std::fputs("Recall: destino,paquete,estado u orden incorrecto\n",stderr);std::exit(1);}}
 struct OBJECT{WORD Type;BYTE CurrentAction,Teleport;float Alpha,Position[3],Angle[3];};
-struct CHARACTER{BYTE Class;OBJECT Object;float TargetPosition[2];}heroView;
+struct CHARACTER{BYTE Class;OBJECT Object;float TargetPosition[2];WORD Key;}heroView,targetView;
 char *hero,*characters,*Hero,*CharactersClient,*target;
 int DAT_07e91388,SelectedCharacter,PartyNumber,Teleport;DWORD TargetX,TargetY,DAT_07e11dc4,DAT_07e11dc8;
+#define pPickedItemKey DAT_07e91388
 DWORD DAT_07d78098,DAT_07d7809c,MovementSkillTarget,CurrentSkill;
 BYTE terrain[65536];unsigned char* TerrainWall=terrain;
 bool member;int castingSkill=15;std::vector<int> randoms,events;unsigned randomAt;std::vector<BYTE> packet;
-CHARACTER* AsCharacter(char* p){Require(p==hero);return &heroView;}
+CHARACTER* AsCharacter(char* p){Require(p==hero||p==target);if(p==hero)return &heroView;std::memcpy(&targetView.Key,target+476,sizeof(WORD));return &targetView;}
 OBJECT* AsObject(char* p){Require(p==hero||p==target);return p==hero?&heroView.Object:reinterpret_cast<OBJECT*>(target);}
 namespace EntityName{const char* Get(const void* p){Require(p==target);return "Ally";}}
 const char* Party_GetName(int row){Require(row>=0&&row<PartyNumber);return row==1&&member?"Ally":"Someone";}
@@ -118,8 +119,8 @@ int main(){
 '''
 
 def harness(root=ROOT,revision=None):
-    path='src/Combat/Combat.cpp'
-    source=subprocess.check_output(['git','show',revision+':'+path],cwd=root).decode('utf-8') if revision else lower((root/path).read_text(encoding='utf-8'))
+    path='src/game/combat/Combat.cpp'
+    source=__import__('source_paths').show(root, revision, path) if revision else lower((root/path).read_text(encoding='utf-8'))
     seed=function(source,'Combat_SeedRuntimeState97k').replace('Combat_SeedRuntimeState97k','ActualSeed')
     send=function(source,'Combat_SendPartyRecall97k').replace('Combat_SendPartyRecall97k','ActualSend')
     return SERVICES.replace('SEED',seed).replace('SEND',send).replace('ATTACK',function(source,'Attack_Label1585_97k'))+MAIN

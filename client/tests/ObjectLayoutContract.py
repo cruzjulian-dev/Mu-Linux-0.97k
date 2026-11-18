@@ -14,14 +14,14 @@ def record(source,name):
     return re.search(r'struct '+name+r'\s*\{.*?\n\};',source,re.S).group()
 
 def object_types():
-    header=read_source('src/Entity/EntityTypes.h')
+    header=read_source('src/game/entity/EntityTypes.h')
     return '#pragma pack(push,1)\n'+''.join(record(header,name) for name in ['OBJECT','PART_t','CHARACTER'])+'\n#pragma pack(pop)\n'
 
 def core(source):
     return source.split('// common initialisation',1)[1].split('// login/char-select scene type overrides',1)[0]
 
 def harness(args):
-    header=read_source('src/Entity/EntityTypes.h')
+    header=read_source('src/game/entity/EntityTypes.h')
     fields=re.findall(r'MU_ASSERT_FIELD\(OBJECT,\s*(\w+),\s*(0x[0-9a-fA-F]+)\)',header)
     assertions='\n'.join(f'static_assert(offsetof(OBJECT,{name})==NativeOffset({offset}),"{name}");' for name,offset in fields)
     prefix=r'''
@@ -33,7 +33,7 @@ def harness(args):
 #include <type_traits>
 using BYTE=std::uint8_t;using WORD=std::uint16_t;using DWORD=std::uint32_t;using UINT=std::uint32_t;
 using vec3_t=float[3];using vec34_t=float[3][4];
-'''+object_types()+read_source('src/Item/ItemTypes.h')+record(read_source('src/structs.h'),'ITEM_t')+r'''
+'''+object_types()+read_source('src/game/item/ItemTypes.h')+record(read_source('src/structs.h'),'ITEM_t')+r'''
 constexpr std::size_t NativeOffset(std::size_t offset){return offset+(sizeof(void*)==8?(offset>=0x1b8?16:offset>=0x188?12:offset>=0x118?8:offset>=0x100?4:0):0);}
 static_assert(sizeof(OBJECT)==(sizeof(void*)==4?0x1bc:0x1d0));
 static_assert(sizeof(CHARACTER)==(sizeof(void*)==4?0x394:0x3d4));
@@ -49,8 +49,8 @@ OBJECT* AsObject(void* p){return static_cast<OBJECT*>(p);}
 void Require(bool ok){if(!ok){std::fputs("Contrato OBJECT o escritura incorrecta\n",stderr);std::exit(1);}}
 '''+assertions
     parameters='int param_1,float* param_2,float* param_3,float param_4,BYTE bVar4'
-    current=core(read_source('src/Scene/Scene_EntityLifecycle.cpp',args.current_ref))
-    reference=core(read_source('src/Scene/Scene_EntityLifecycle.cpp',args.reference_ref)) if args.reference_ref else read_source('tests/fixtures/object-create-core-x86.inc')
+    current=core(read_source('src/scenes/Scene_EntityLifecycle.cpp',args.current_ref))
+    reference=core(read_source('src/scenes/Scene_EntityLifecycle.cpp',args.reference_ref)) if args.reference_ref else read_source('tests/fixtures/object-create-core-x86.inc')
     functions='\nvoid Current(UINT* puVar3,'+parameters+'){'+current+'}\nvoid Reference(UINT* puVar3,'+parameters+'){'+reference+'}\n'
     main=r'''
 int main(){

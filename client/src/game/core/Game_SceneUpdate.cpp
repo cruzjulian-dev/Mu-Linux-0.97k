@@ -1,0 +1,829 @@
+// Game_SceneUpdate.cpp
+// Game_SceneUpdate @ 0x0051F900
+//
+// Login scene tick — called every frame from Game_MainLoop while in login state.
+// Drives the entire login → character-select pipeline as a state machine.
+//
+// ── LOGIN SUB-STATE (DAT_083a7c14) ───────────────────────────────────────────
+//   0   ServerSelect    — Scene_Login_ServerSelect() rendered
+//   1   Connecting      — progress bar; keep-alive 0xC1 every 3000 ms
+//   2   CredentialInput — username/password dialog
+//   3   AwaitLoginResp  — packet sent; waiting for server response
+//   4   LoginFailed     — error dialog
+//   8   CharSelectInit  — ClearInput(1); char select setup
+//  12   Error/Timeout   — retry path (up to 4 retries)
+//
+// ── SERVER RESPONSE CODE (DAT_05826cb0) ──────────────────────────────────────
+//   0x0b  Login OK      → state=2
+//   0x0c  Login fail A  → state=4
+//   0x0d  Login fail B  → state=4, DAT_07e11d78=6
+//   0x14  Char list rdy → sends 0xC1/0xF3; transitions to char-select
+//   0x15-0x26 errors    → state=2, various DAT_07e11d78 values
+//   0x3e  special       → state=8, CharSelect_Init, InputTextHide[1]=2
+//   0x40-0x47 success   → state=2, CharSelect_Init, restore version→username
+//
+// ── ANIMATION (DAT_005616a4 = dialog Y lerp) ─────────────────────────────────
+//   state 0         : Y eases to 0x108 (ServerSelect bar)
+//   state 1,3,5,7,9 : Y eases to 0x1c4 (credentials up)
+//   state 2,4,6,8   : Y eases to 0x93  (credentials panel)
+
+#include "stdafx.h"
+#include <algorithm>
+#include "platform/ITimer.h"
+#include "platform/ISocket.h"
+#include "net/Reconnect.h"
+#include "net/PacketFrame.h"
+
+extern "C" void DbgLogPublic(const char* msg);
+extern "C" { void DbgLogPublic(const char*); }
+#pragma warning(disable: 4554 4244 4018 4146)
+#include "game/core/Game_SceneUpdate.h"
+#include "net/Net.h"
+#include "net/MuEmu.h"
+#include "net/Network.h"
+
+
+static void LoginScene_ApplySafeObjectAnim()
+{
+    if (!(SceneFlag == 2 || SceneFlag == 4))
+        return;
+
+    extern float WorldTime;  // WorldTime
+    extern void __cdecl MoveObject_Special(OBJECT* object); // Actualización especial de objetos del login.
+    extern int __cdecl Calc_RenderObject(OBJECT* param_1, char param_2, int param_3);  // Calc_RenderObject
+    extern void __stdcall MoveBugs(void);  // butterfly/helper owner-follow update
+
+    for (int i = 0; i < 9; ++i) {
+        char* obj = (char*)g_LoginSceneObjects[i];
+        if (!obj || *obj == '\0')
+            continue;
+
+        // Match the original order more closely: Alpha(o) runs before the
+        // animation tick and can early-out nearly invisible objects.
+        MoveObject_Special(AsObject(obj));
+        if (AsObject(obj)->Alpha < 0.01f)
+            continue;
+
+        short type = AsObject(obj)->Type;
+        char* model = (char*)(Models + type * BMD_STRIDE);
+        if (model) {
+            AsModel(model)->CurrentAction = AsObject(obj)->CurrentAction;
+            BMD__PlayAnimation((void*)model,
+                (float*)&AsObject(obj)->AnimationFrame,
+                (float*)&AsObject(obj)->PriorAnimationFrame,
+                (void*)&AsObject(obj)->PriorAction,
+                AsObject(obj)->Velocity);
+        }
+
+        if (type == 160 || type == 161) {
+            float v = (float)((long long)WorldTime % 4000);
+            AsObject(obj)->BlendMeshTexCoordV = -(v * 0.00025f);
+            continue;
+        }
+
+        if (type == 162) {
+            float ramp = (CameraWalkCut != 0) ? 1.5f : ((float)(int)CurrentCameraCount * 0.002f);
+            AsObject(obj)->Light[0] = ramp;
+            AsObject(obj)->Light[1] = ramp;
+            AsObject(obj)->Light[2] = ramp;
+            AsObject(obj)->BlendMeshLight = ramp;
+        }
+
+        // La pose y las antorchas del barco se publican después de este tick
+        // desde Terrain_PrepareSimulation/WorldEffects_Tick.
+    }
+
+    // Login uses the Butterfles pool for the floating fairy/angel helper
+    // created by CreateBug(0x330). Spawning it without the pool tick leaves
+    // it frozen at its randomized birth offset; run the safe pool follower
+    // update here so it tracks the elf preview like the original scene.
+    if (SceneFlag == 2) {
+        MoveBugs();
+    }
+}
+
+static void LoginScene_ClearPreviewEquipmentMeta(unsigned char* c)
+{
+    if (!c) return;
+
+    // Level, Option1, LinkBone y CurrentAction de las seis piezas del cuerpo y
+    // del arma 0 (los bytes +2..+5 de cada PART_t, 0x1E2..0x272 en x86).
+    CHARACTER* ch = AsCharacter(c);
+    PART_t* const parts[7] = { &ch->BodyPart[0], &ch->BodyPart[1], &ch->BodyPart[2], &ch->BodyPart[3],
+                               &ch->BodyPart[4], &ch->BodyPart[5], &ch->Weapon[0] };
+    for (PART_t* part : parts) {
+        part->Level = 0; part->Option1 = 0; part->LinkBone = 0; part->CurrentAction = 0;
+    }
+
+    AsCharacter(c)->Weapon[1].Level = 0;
+    AsCharacter(c)->Weapon[1].Option1 = 0;
+    AsCharacter(c)->Weapon[1].LinkBone = 0;
+    AsCharacter(c)->Weapon[1].CurrentAction = 0;
+    AsCharacter(c)->Wing.Level = 0;
+    AsCharacter(c)->Wing.Option1 = 0;
+    AsCharacter(c)->Wing.LinkBone = 0;
+    AsCharacter(c)->Wing.CurrentAction = 0;
+    AsCharacter(c)->Helper.Level = 0;
+    AsCharacter(c)->Helper.Option1 = 0;
+    AsCharacter(c)->Helper.LinkBone = 0;
+    AsCharacter(c)->Helper.CurrentAction = 0;
+}
+
+// Encrypt bytes [start..end) in pkt using the login XOR key.
+// Each byte: pkt[i] ^= key[i & 0x1f] ^ pkt[i] (Ghidra pattern)
+static void Pkt_XorRange(BYTE* pkt, int start, int end)
+{
+    for (int i = start; i < end; i++)
+        pkt[i] ^= CNetwork::XorKey[i & 0x1f] ^ pkt[i + 1];
+}
+
+
+extern "C" { void DbgLogPublic(const char*); }
+
+int Game_SceneUpdate(void)
+{
+    // ── ONE-TIME INIT ─────────────────────────────────────────────────────────
+    if (InitLogIn == '\0') {
+        InitLogIn = 1;
+        gMapManager.SetCurrentMap(0xffffffff);
+        CurrentProtocolState  = 0;
+
+        // NOTE: the canonical IDA init at 0x0051F900 lines 220-289 does NOT
+        // call Net_Connect here. The socket is opened only when the user
+        // picks a server in the ServerSelect UI (state 0 → 1 transition),
+        // which is how the login scene gets its connecting-progressbar.
+        // Calling CreateSocket at scene-init bypasses ServerSelect entirely
+        // (the server responds with JoinServer before the user ever sees the
+        // list), so we leave it commented out. See IDA line 238+ — only the
+        // state/UI globals are initialized here.
+        // CreateSocket(szServerIpAddress,
+        //              (unsigned)(0 | (g_ServerPort)));
+        EnableSocket = 1;
+        ServerListCount = 0;
+
+        // ── Flujo ConnectServer ──────────────────────────────────
+        // Si ServerConfig tiene ConnectServer (ConnectServerPort != 0), conectamos YA
+        // al ConnectServer para recibir la lista real + el load. A diferencia
+        // del GameServer, el ConnectServer NO responde JoinServer al conectar:
+        // espera nuestro request C1 04 F4 02 (enviado en FD_CONNECT) y responde
+        // con F4/04 (nombres) + F4/02 (load). Al elegir server mandamos F4/03 y
+        // el redirect nos lleva al GameServer. Si NO hay línea 2, queda el flujo
+        // directo clásico (conectar al elegir server).
+        if (gNetwork.HasConnectServer() && gNetwork.IsConnectServerMode()
+            && Platform::GetSocket().IsConnected(SocketClientSocket)) {
+            // La intro dejó abierta la conexión con el ConnectServer (la usó para
+            // sincronizar el contenido): la lista se pide por ella.
+            gNetwork.RequestServerList();
+        } else if (gNetwork.HasConnectServer()) {
+            gNetwork.BeginConnectServerSession();
+            // CRÍTICO: el ConnectServer usa paquetes PLANOS (sin el byte-XOR
+            // MuEmu del GameServer). Desactivamos la capa MuEmu mientras hablamos
+            // con el CS; Recv_Redirect la reactiva al saltar al GameServer.
+            extern void CreateSocket(const char *server, unsigned int port);
+            CreateSocket(szServerIpAddress, (unsigned)g_ServerPort);
+        }
+
+        // Load login-scene resources (sounds, textures)
+        Scene_LoadAccountResources(); // OpenLogoSceneData (IDA)
+
+        // Clear 8 entity slots at base entity array + 0x168 (stride sizeof(CHARACTER))
+        {
+            CHARACTER* chars = AsCharacter(CharactersClient);
+            for (int i = 7; i >= 0; i--)
+                chars[i].Object.Alpha = 0.0f;
+        }
+
+        // Spawn background world objects.
+        // Valores de Ghidra @ 0x0051F900 (MoveLogInScene) líneas 100-260. `rot` se
+        // resetea antes del mu banner (0xA2) y del sky4 (0xA3).
+        {
+            // ── VALORES CANÓNICOS ─────────────────────────────
+            // Restaurados desde Ghidra/IDA @ 0x0051F900 líneas 150-235.
+            // CreateObject aplica scale override vía
+            // byte_4FFAA4[type-60] cuando SceneFlag==2||4:
+            //   type 60  (ship)    → scale 0.8
+            //   type 160 (sky)     → scale 0.0438
+            //   type 161 (wave)    → scale 0.8
+            //   type 162 (banner)  → scale 0.6
+            //   type 163 (sun)     → scale 3.0
+            // No hacer hacks de scale ni de rot aquí — si algo no renderiza,
+            // el bug está upstream en el pipeline (no en los valores).
+            float pos[3], rot[3], scale = 1.0f;
+
+            for (int i = 0; i < 9; ++i) g_LoginSceneObjects[i] = 0;
+
+            // Sky 0xA0 @ (0, -520, 0) — rot (0,0,0)
+            rot[0] = 0.0f; rot[1] = 0.0f; rot[2] = 0.0f;
+            pos[0] = 0.0f; pos[1] = -520.0f; pos[2] = 0.0f;
+            g_LoginSceneObjects[0] = CreateObject(0xa0, pos, rot, scale);
+
+            // Ships + Waves: rot (0, 0, 180) canónico.
+            float rotShip[3] = { 0.0f, 0.0f, 180.0f };
+
+            // Ship 1 + wave 1 @ (-700, 700, 0)
+            pos[0] = -700.0f; pos[1] = 700.0f; pos[2] = 0.0f;
+            g_LoginSceneObjects[1] = CreateObject(0x3c, pos, rotShip, scale);
+            g_LoginSceneObjects[2] = CreateObject(0xa1, pos, rotShip, scale);
+
+            // Ship 2 + wave 2 @ (400, 400, 0)
+            pos[0] = 400.0f; pos[1] = 400.0f; pos[2] = 0.0f;
+            g_LoginSceneObjects[3] = CreateObject(0x3c, pos, rotShip, scale);
+            g_LoginSceneObjects[4] = CreateObject(0xa1, pos, rotShip, scale);
+
+            // Ship 3 + wave 3 @ (-200, -400, 0)
+            pos[0] = -200.0f; pos[1] = -400.0f; pos[2] = 0.0f;
+            g_LoginSceneObjects[5] = CreateObject(0x3c, pos, rotShip, scale);
+            g_LoginSceneObjects[6] = CreateObject(0xa1, pos, rotShip, scale);
+
+            // Mu banner 0xA2 @ (0, -600, 480)
+            rot[0] = 0.0f; rot[1] = 0.0f; rot[2] = 0.0f;
+            pos[0] = 0.0f; pos[1] = -600.0f; pos[2] = 480.0f;
+            g_LoginSceneObjects[7] = CreateObject(0xa2, pos, rot, scale);
+
+            // Sun 0xA3 @ (-110, 1600, 50)
+            pos[0] = -110.0f; pos[1] = 1600.0f; pos[2] = 50.0f;
+            g_LoginSceneObjects[8] = CreateObject(0xa3, pos, rot, scale);
+        }
+
+        // Spawn 3 background characters (entity id, class, 0, 0, 0)
+        unsigned char* loginPreview1 = CreateHero(1, 1, 0, 0.0f, 0.0f, 0.0f);
+        LoginScene_ClearPreviewEquipmentMeta(loginPreview1);
+        {
+            intptr_t base = CharactersClient;
+            // Entity 0 (slot 0) — scale + position
+            *(float*)(base + CHARACTER_STRIDE * 1 + 0xc) = 0.6f;
+            *(int*)  (base + CHARACTER_STRIDE * 1 + 0x1c) = 0;
+            *(int*)  (base + CHARACTER_STRIDE * 1 + 0x20) = 0;
+            *(float*)(base + CHARACTER_STRIDE * 1 + 0x24) = 180.0f;
+            *(float*)(base + CHARACTER_STRIDE * 1 + 0x10) = -200.0f;
+            *(float*)(base + CHARACTER_STRIDE * 1 + 0x14) = -750.0f;
+            *(float*)(base + CHARACTER_STRIDE * 1 + 0x18) = 250.0f;
+        }
+
+        unsigned char* loginPreview2 = CreateHero(2, 0, 0, 0.0f, 0.0f, 0.0f);
+        LoginScene_ClearPreviewEquipmentMeta(loginPreview2);
+        {
+            intptr_t base = CharactersClient;
+            // Entity 2 (elf).
+            // Ghidra @ 0x0051F900 línea 239: CharactersClient[2].Position[1] = -770.0
+            *(float*)(base + CHARACTER_STRIDE * 2 + 0xc) = 0.6f;
+            *(int*)  (base + CHARACTER_STRIDE * 2 + 0x1c) = 0;
+            *(int*)  (base + CHARACTER_STRIDE * 2 + 0x20) = 0;
+            *(float*)(base + CHARACTER_STRIDE * 2 + 0x24) = 180.0f;
+            *(float*)(base + CHARACTER_STRIDE * 2 + 0x10) = -240.0f;
+            *(float*)(base + CHARACTER_STRIDE * 2 + 0x14) = -770.0f;
+            *(float*)(base + CHARACTER_STRIDE * 2 + 0x18) = 250.0f;
+        }
+
+        unsigned char* loginPreview3 = CreateHero(3, 2, 0, 0.0f, 0.0f, 0.0f);
+        LoginScene_ClearPreviewEquipmentMeta(loginPreview3);
+        {
+            intptr_t base  = CharactersClient;
+            intptr_t slot3 = base + CHARACTER_STRIDE * 3 + 0x0;  // entity 3 base
+            *(float*)(base + CHARACTER_STRIDE * 3 + 0xc) = 0.6f;
+            *(int*)  (base + CHARACTER_STRIDE * 3 + 0x1c) = 0;
+            *(int*)  (base + CHARACTER_STRIDE * 3 + 0x20) = 0;
+            *(float*)(base + CHARACTER_STRIDE * 3 + 0x24) = 180.0f;
+            *(float*)(base + CHARACTER_STRIDE * 3 + 0x10) = 400.0f;
+            *(float*)(base + CHARACTER_STRIDE * 3 + 0x14) = 50.0f;
+            *(float*)(base + CHARACTER_STRIDE * 3 + 0x18) = 250.0f;
+            CreateBug(0x330, (void*)(base + CHARACTER_STRIDE * 3 + 0x10), (void*)slot3, 0);
+        }
+
+        // Initialize state variables
+        LoginSubState = 0;       // state = ServerSelect
+        DAT_083a7c18 = 0;
+        DAT_005616a4 = 0x1e0;   // dialog Y start
+        DAT_005616a8 = (int)0xffffff38;
+        ServerSelectHi = -1;      // no server selected
+        ServerSelectLo = -1;      // no channel selected
+        DAT_083a7c44 = 0;
+        GuildInputEnable = 0;
+        TabInputEnable = 0;
+        GoldInputEnable = 0;
+        InputEnable = 1;
+        ClearInput(1);        // CharSelect_Init
+
+        // Copy version string → username buffer
+        {
+            int vlen = (int)strlen((char*)g_szSavedUsername);
+            memcpy(InputText, g_szSavedUsername, vlen + 1);
+            // InputTextMax is a per-slot array. IDA canonical init sets BOTH
+            // slots so password accepts input too; only setting slot 0 used to
+            // silently reject every keystroke in the password field.
+            ((int*)&InputTextMax)[0] = 10;  // InputTextMax[0] = username max
+            ((int*)&InputTextMax)[1] = 10;  // InputTextMax[1] = password max
+            InputNumber = 2;
+            InputTextHide[1] = 1;
+            InputLength[0] = (int)vlen;
+            InputIndex = (vlen != 0) ? 1 : 0;
+        }
+
+        // Populate server list UI (120 × Widget_Draw)
+        for (int i = 0x78; i > 0; i--)
+            UIChatLogWindow_AddText((const char*)&DAT_083a7c70, (const char*)&DAT_083a7c6c, 0);
+
+        // En el binario original el check es `if (Hero == NULL)` donde Hero es
+        // la base del array de personajes (constante, nunca NULL). Ghidra lo
+        // tradujo como DAT_07abf5d8 == 0 (byte en offset 0x8 de entity 0) que
+        // SÍ es 0 tras el spawn → escribiría a 0x10/0x14/0x18 (null deref).
+        // Branch muerto en el exe real; lo deshabilitamos.
+
+        // Camera initial position from server-slot table
+        // DAT_005615ec/f0/f4/f8/fc/600 son aliases DWORD& sobre el storage float
+        // CameraWalk_005615ec[]: se leen vía float* para no convertir int→float.
+        _DAT_083a42d4 = 0; _DAT_083a42d8 = 0; _DAT_083a42dc = 0;
+        DAT_083a42b8 = 0;
+        DAT_083a7ad0  = *((float*)&DAT_005615f8 + CurrentCameraNumber * 6);
+        DAT_083a7ad4  = *((float*)&DAT_005615fc + CurrentCameraNumber * 6);
+        DAT_083a7ad8  = *((float*)&DAT_00561600 + CurrentCameraNumber * 6);
+        DAT_083a432c  = (&DAT_005615ec)[CurrentCameraNumber * 6];   // DWORD&=DWORD ok
+        DAT_083a4330  = (&DAT_005615f0)[CurrentCameraNumber * 6];   // DWORD&=DWORD ok
+        _DAT_083a4334 = *((float*)&DAT_005615f4 + CurrentCameraNumber * 6);
+        DAT_083a42bc = 0;
+        DAT_083a42c0 = 0;
+        CurrentCameraCount = -1;
+
+        // Los defaults de camara (FOV/Near/Far) salen de globals.cpp (valores
+        // del .data del PE: 55.0 / 20.0 / 2000.0) y MoveCamera arma pose+angulo
+        // cada frame desde la tabla contigua CameraWalk_005615ec[].
+
+
+        CErrorReport_Write(&DAT_055c9bf0, "> Login Scene init success");
+    }
+
+    // ── PER-FRAME UPDATES ─────────────────────────────────────────────────────
+    Object_MoveUpdate();
+    // IDA Game_SceneUpdate (0x51F900) llama MoveParticles() cada frame: tickea y
+    // expira las partículas. Nuestro Particle_Update() es en realidad
+    // Trail_RenderAll (0x46C3E0, mal nombrado) y no decrementa el lifetime.
+    MoveParticles();
+
+    // ── Per-character animation tick (login scene) ────────────────────────────
+    // En el binario original MoveCharactersClient (0x00455010) corre cada frame
+    // y llama MoveCharacter → CharacterAnimation → sub_440AA0 para avanzar
+    // entity[+0x108] (frame). Sin esta llamada el ship + el barbarian del login
+    // se quedan congelados en frame 0 (cambian de pose abruptamente cuando se
+    // setea entity[+0x105], pero no animan).
+    {
+        for (int s = 0; s < 8; ++s) {
+            intptr_t e = (intptr_t)CharactersClient + s * CHARACTER_STRIDE;
+            if (*(char*)e != '\0') {
+                MoveCharacterVisual(e);            // model.action ← entity.action
+                CharacterAnimation(e, e);   // advance entity[+0x108]
+            }
+        }
+    }
+
+    Login_CameraUpdate();
+    // MoveCamera @ 0x0051E4E0 — login scene camera fly-through. Reads
+    // CameraWalk_005615ec[] and writes CameraAngle/CameraPosition each frame.
+    // Missing this call left the camera at (0,0,0) with angles (0,0,0).
+    MoveCamera();
+    LoginScene_ApplySafeObjectAnim();
+
+    // Random preview-character action changes (IDA 0x0051F900):
+    // the login scene nudges the three background characters into alternate
+    // idle/gesture actions with a 1/128 chance each frame.
+    {
+        std::uintptr_t e3 = CharactersClient + CHARACTER_STRIDE * 3;  // entity 3
+        if ((_rand() & 0x7f) == 0) SetAction(AsObject(e3), 113);
+        if ((_rand() & 0x7f) == 0) SetAction(AsObject(e3), 99);
+
+        std::uintptr_t e2 = CharactersClient + CHARACTER_STRIDE * 2;  // entity 2
+        if ((_rand() & 0x7f) == 0) SetAction(AsObject(e2), 115);
+        if ((_rand() & 0x7f) == 0) SetAction(AsObject(e2), 111);
+
+        std::uintptr_t e1 = CharactersClient + CHARACTER_STRIDE;  // entity 1
+        if ((_rand() & 0x7f) == 0) SetAction(AsObject(e1), 101);
+        if ((_rand() & 0x7f) == 0) SetAction(AsObject(e1), 111);
+    }
+
+    // Optional UI scene load if CameraWalkCut == 1 && no server selected
+    if (CameraWalkCut == 1 && CurrentCameraCount == 0)
+        PlayBuffer(4, 0, 0);
+
+    // ── STATE 0: SERVER SELECT ────────────────────────────────────────────────
+    if (LoginSubState == 0) {
+        CServerSelWin_UpdateWhileActive();  // Scene_Login_ServerSelect
+    }
+
+    // ── STATE 1 / 12: CONNECTING / ERROR ─────────────────────────────────────
+    if (LoginSubState == 1 || LoginSubState == 0xc) {
+        DWORD now = Platform::GetTimer().Ticks();
+        DWORD elapsed = now - DAT_083a7ac8;
+
+        if (elapsed < 0x3a99) {
+            // Progress bar
+            DWORD clamped = (elapsed < 15000) ? elapsed : 15000;
+
+            // Send keep-alive every 3000 ms
+            if (DAT_083a4320 < (int)(clamped / 3000)) {
+                DAT_083a4320++;
+                if (LoginSubState == 1) {
+                    // Build 6-byte keep-alive: [0xC1][6][0x05][seq][0][0]
+                    BYTE pkt[6];
+                    pkt[0] = 0xC1; pkt[1] = 6; pkt[2] = 0x05;
+                    pkt[3] = (BYTE)DAT_083a4328;
+                    pkt[4] = 0; pkt[5] = 0;
+                    gNetwork.SendRaw((char*)pkt, 6);
+                    // IDA 0x0051F900 L445-446: these are GlobalText[470]/[471],
+                    // not independent empty buffers.
+                    UIChatLogWindow_AddText((const char*)&DAT_083a7c74, GlobalText[470], 1);
+                    UIChatLogWindow_AddText((const char*)&DAT_083a7c78, GlobalText[471], 1);
+                }
+            }
+        } else if (LoginSubState == 1) {
+            // Timeout: reset to ServerSelect
+            LoginSubState = 0;
+            DAT_083a7c44 = 0;
+        } else {
+            // state == 12: restart timestamp
+            if (LoginSubState == 0xc)
+                DAT_083a7ac8 = Platform::GetTimer().Ticks();
+        }
+
+        // Click "back" button (0x11d-0x162, Y: 0x106-0x119)
+        if (MouseX >= 0x11d && MouseX <= 0x162 &&
+            MouseY >= 0x106 && MouseY <= 0x119 &&
+            IsClickPushed())
+        {
+            MouseLButtonPush = '\0';
+            if (LoginSubState == 1) {
+                LoginSubState = 0;
+                DAT_083a7c44 = 0;
+            } else if (LoginSubState == 0xc) {
+                if (DAT_083a4320 < 4) {
+                    // Retry: disconnect and reconnect
+                    goto LAB_00520fd8;
+                }
+                LoginSubState = 0;
+                DAT_083a7c44 = 0;
+                Net_Disconnect(SocketClient);
+                CurrentProtocolState = 0;
+                CreateSocket(szServerIpAddress,
+                             (unsigned)g_ServerPort);
+            }
+        }
+        goto LAB_00520fd8;
+    }
+
+    // ── STATE 2-3: CREDENTIAL INPUT / AWAIT LOGIN RESPONSE ───────────────────
+    if (LoginSubState >= 2 && LoginSubState <= 3) {
+        int dialogY = DAT_005616a4;
+
+        // Account list click: entries at Y = dialogY+0x32, stride 0x14
+        {
+            int entryY = dialogY + 0x32;
+            for (int i = 0; i < InputNumber; i++, entryY += 0x14) {
+                if (MouseX > 0x124 && MouseX < 0x1a1 &&
+                    MouseY >= entryY && MouseY < entryY + 0x14 &&
+                    IsClickPushed())
+                {
+                    MouseLButtonPush = '\0';
+                    InputIndex = (unsigned)i;
+                    ErrorMessage = NextErrorMessage;
+                    NextErrorMessage = MESSAGE_NONE;
+                }
+            }
+        }
+
+        // Login trigger: Enter key (byte_55CA038) OR click on Login button.
+        // Canonical IDA @0x0051F900 gates the entire credential-check +
+        // login-send path on this compound trigger — without it the block
+        // below fires every frame as soon as JoinServer sets code=2, which
+        // spams the server with an empty-creds login and gets the connection
+        // dropped.
+        bool loginTrigger = (DAT_055ca038 != '\0');
+        if (loginTrigger) DAT_055ca038 = '\0';
+
+        // Login button rect: MouseX in [0x143,0x188], Y in [dialogY+0x5f,+0x72].
+        // IDA: if login-click THEN consume click + fall-through; else if (!v41)
+        //      goto LABEL_194 (skip login logic).
+        bool loginClick = (MouseX >= 0x143 && MouseX <= 0x188 &&
+                           MouseY >= dialogY + 0x5f &&
+                           MouseY <= dialogY + 0x72 &&
+                           IsClickPushed());
+        if (loginClick) {
+            MouseLButtonPush = '\0';
+            loginTrigger = true;
+        }
+
+        if (loginTrigger && CurrentProtocolState != 0) {
+            // Reset slot selection
+            ErrorMessage = NextErrorMessage;
+            NextErrorMessage = MESSAGE_NONE;
+            PlayBuffer(0x19, 0, 0);
+
+            // Check username empty
+            int ulen = (int)strlen((char*)InputText);
+            if (ulen == 0) {
+                // No username: set slot error
+                if (ErrorMessage == MESSAGE_NONE) { ErrorMessage = MESSAGE_INPUT_ID; }
+                else                   { NextErrorMessage = MESSAGE_INPUT_ID; }
+                InputIndex = 0;
+                DAT_005616a0 = 1;
+            } else {
+                int plen = (int)strlen((char*)DAT_07db8810);
+                if (plen == 0) {
+                    if (ErrorMessage == MESSAGE_NONE) { ErrorMessage = MESSAGE_INPUT_PASSWORD; }
+                    else                   { NextErrorMessage = MESSAGE_INPUT_PASSWORD; }
+                    InputIndex = 1;
+                    DAT_005616a0 = 1;
+                }
+            }
+
+        // Login packet send — ONLY when user actually pressed login.
+        if (ErrorMessage == MESSAGE_NONE) {
+            int code = CurrentProtocolState;
+            bool validCode = (code == 2 || code == 0xb || code == 0xc || code == 0xd ||
+                              (code > 0x14 && code < 0x22));
+            if (validCode) {
+                CErrorReport_Write(&DAT_055c9bf0, "> Login Request");
+                DAT_083a7ac8 = Platform::GetTimer().Ticks();
+                DAT_083a4320 = 0;
+                CErrorReport_Write(&DAT_055c9bf0, "> Try to Login ... %s",
+                             (char*)InputText);
+
+                // Copy username to packet staging buffer
+                int ulen = (int)strlen((char*)InputText) + 1;
+                memcpy(LogInID, InputText, ulen);
+                LogIn = 1;
+                CurrentProtocolState = 0x13;
+
+                // Build login packet [0xC1][0xF1] + user(10) + pass(10) + tick(4) + 5 obf + 16 raw
+                BYTE user[10] = {0}, pass[10] = {0};
+                memcpy(user, InputText, (std::min)(ulen - 1, 10));
+                memcpy(pass, DAT_07db8810, (std::min)((int)strlen((char*)DAT_07db8810), 10));
+                // NOTE: companion client (Mu-linux-97K/Source/Client/Main/Reconnect.cpp:222-224)
+                // does NOT pre-process account/password — they're fed RAW into
+                // PacketArgumentEncrypt (the 3-byte XOR below).  We used to call
+                // Buffer_XorKey3 (Buffer_XorKey3) here, which mangled the strings
+                // (server saw 'emap...' for input "emanuel...") and the server
+                // silently dropped the packet.  Removed.
+
+                // Packet layout matches companion client's PMSG_CONNECT_ACCOUNT_SEND
+                // (Mu-linux-97K/Source/Client/Main/Protocol.h:370,
+                //  Reconnect.cpp:218 build sequence):
+                //   pkt[0]=0xC1 placeholder (send-wrapper replaces with 0xC3),
+                //   pkt[1]=size placeholder (stomped with serial in gNetwork.Send),
+                //   pkt[2]=0xF1 (head — plaintext),
+                //   pkt[3]=0x01 (subh — plaintext, was wrong before → server saw 0x79),
+                //   pkt[4..13]=account (XOR'd with {0xFC,0xCF,0xAB} via
+                //                       PacketArgumentEncrypt — 3-byte rotating key),
+                //   pkt[14..23]=password (same 3-byte XOR),
+                //   pkt[24..27]=TickCount (plaintext, little-endian DWORD),
+                //   pkt[28..32]=ClientVersion[5] with (v[i] - i - 1) obfuscation,
+                //   pkt[33..48]=ClientSerial[16] raw copy.
+                // Total plaintext = 49 bytes. CSM expands 48 payload bytes → 66 cipher.
+                // Previous implementation XOR-chained every byte starting at pkt[3],
+                // which corrupted the subh byte (server saw 0x79 instead of 0x01) and
+                // caused LoginResult code=0x05 (blacklist path: empty HardwareID).
+                // Armado del F1/01 en CNetwork::SendLogin (lo comparte la reconexión).
+                gNetwork.SendLogin((const char*)user, (const char*)pass);
+                gReconnect.OnLoginSent((const char*)user, (const char*)pass);
+
+                // Diagnóstico: log de cada intento de login (longitudes + serial actual,
+                // nunca la password), para correlacionar con "F1/01 LOGIN-RESULT code=..."
+                // en Net_Process.
+                {
+                    static int s_loginAttempt = 0;
+                    s_loginAttempt++;
+                }
+
+                // Post-login status dialog.  In the original binary (IDA
+                // 0x0051F900 L1074-1075) these were GlobalText[472] / [473] —
+                // loaded from Data\Local\Text.bmd.  Ghidra split them into the
+                // independent empty buffers DAT_07d4c644 / DAT_07d4c770, which
+                // is why the user saw "cartel sin texto".  Read the real
+                // localized strings directly from the GlobalText[] pool.
+                UIChatLogWindow_AddText((const char*)&DAT_083a7c7c, GlobalText[472], 1);
+                UIChatLogWindow_AddText((const char*)&DAT_083a7c80, GlobalText[473], 1);
+                LoginSubState = 3;
+                DAT_083a7c18 = 0xc;
+            } else {
+                DAT_083a7c18 = 3;
+            }
+        } else {
+            LoginSubState = 3;
+            DAT_083a7c18 = 2;
+        }
+        PlayBuffer(0x1b, 0, 0);
+        } // end if (loginTrigger && DAT_05826cb0 != 0)
+    }
+
+    // Login/Start button click (0x11c-0x163, Y in [dialogY+0xb4, dialogY+0xc8])
+    {
+        int dialogY = DAT_005616a4;
+        // Diagnostic: dump every frame where the click flag is set inside the
+        // Exit X band, so we can see whether a click is hitting the button or
+        // getting eaten by something earlier.
+        if (IsClickPushed() &&
+            MouseX > 0x100 && MouseX < 0x180)
+        if (MouseX > 0x11c && MouseX < 0x163 &&
+            MouseY >= dialogY + 0xb4 && MouseY < dialogY + 200 &&
+            IsClickPushed())
+        {
+            CErrorReport_Write(&DAT_055c9bf0, "> Login Scene - Exit");
+            MouseLButtonPush = '\0';
+            ErrorMessage = NextErrorMessage;
+            NextErrorMessage = MESSAGE_NONE;
+            PlayBuffer(0x19, 0, 0);
+            LoginSubState = 3;
+            DAT_083a7c18 = 0x1d;
+            DAT_083a7c1c = 1;
+            DAT_083a7c20 = 0x32;
+            Net_Disconnect(SocketClient);
+            PlayBuffer(0x1b, 0, 0);
+        }
+    }
+
+    // ── STATE ANIMATION + SERVER RESPONSE SWITCH ─────────────────────────────
+LAB_00520fd8:
+    {
+        int  state   = LoginSubState;
+        int  respCode = CurrentProtocolState;
+        int  slotA   = ErrorMessage;
+        int  slotB   = NextErrorMessage;
+        int  iVar11  = 0;
+
+        // Tabla de salto del binario (0x0052159C, `state - 2` en 0..9):
+        // estado 2 (usuario/contraseña) baja el panel a Y=0x108; los pares
+        // 4..10 lo suben a 0x93; los impares 3..11 lo sacan a 0x1C4 y
+        // atienden la respuesta del server.  El port le daba 0x108 al
+        // estado 0 (que en el binario no anima) y 0x93 al 2: el panel
+        // quedaba 117 px más arriba que en el original.
+        switch (state - 2) {
+        case 0:  // state 2
+            iVar11 = -(0x108 - DAT_005616a4 >> 0x1f);
+            DAT_005616a4 += (0x108 - DAT_005616a4) / 3;
+            break;
+
+        case 1:  // state 3
+        case 3:  // state 5
+        case 5:  // state 7
+        case 7:  // state 9
+        case 9:  // state 11
+        case -1: // state 1 (no está en la tabla del binario; el flujo de
+                 // conexión del port pasa por acá)
+            // Ease dialog up to Y=0x1c4
+            iVar11 = (0x1c4 - DAT_005616a4) / 2;
+            DAT_005616a4 += iVar11;
+            if (DAT_005616a4 < 0x1c3) {
+                return iVar11;
+            }
+
+            // ── SERVER RESPONSE HANDLER ──────────────────────────────────────
+            switch (respCode) {
+            case 0x0b: // Login OK
+                LoginSubState = 2;
+                InputIndex = 0;
+                InputNumber = 2;
+                if (respCode == 0) {
+                    NextErrorMessage = MESSAGE_NONE; CurrentProtocolState = 2; ErrorMessage = slotB;
+                } else if (slotA == 0) {
+                    CurrentProtocolState = 2; ErrorMessage = respCode;
+                } else {
+                    CurrentProtocolState = 2; NextErrorMessage = respCode;
+                }
+                break;
+
+            case 0x0c:
+            case 0x0d:
+                if (respCode == 0x0d) {
+                    InputIndex = 6;
+                } else {
+                    InputIndex = 0;
+                    if (respCode == 0) {
+                        NextErrorMessage = MESSAGE_NONE;
+                        goto state_fail_common;
+                    }
+                }
+                {
+                    int r = respCode;
+                    if (slotA != 0) { NextErrorMessage = respCode; r = slotA; }
+                    ErrorMessage = r;
+                }
+state_fail_common:
+                CurrentProtocolState = 2;
+                LoginSubState = 4;
+                break;
+
+            case 0x14: // Character list ready
+                CErrorReport_Write(&DAT_055c9bf0, "> Request Character list");
+                SceneFlag = 4;
+                CurrentProtocolState = 0x32;
+                {
+                    // Send 0xC1/0xF3/0x00 char-list request (4 bytes).
+                    //
+                    // El chain XOR también se aplica a los C1: el companion
+                    // (CPacketManager::ExtractPacket) llama XorData con start=3, end=size sobre el
+                    // buffer completo antes de decidir el wrap C3. Fórmula:
+                    // `pkt[i] ^= pkt[i-1] ^ key[i]`; con totalLen=4 es una sola iteración,
+                    // `pkt[3] ^= pkt[2] ^ key[3]`.
+                    BYTE pkt[4];
+                    pkt[0] = 0xC1; pkt[1] = 4; pkt[2] = 0xF3;
+                    pkt[3] = 0;
+                    // Chain XOR (formula universal: pkt[i] ^= pkt[i-1] ^ key[i])
+                    pkt[3] ^= pkt[2] ^ CNetwork::XorKey[3 & 0x1f];
+                    gNetwork.SendRaw((char*)pkt, 4);
+                }
+                Scene_UnloadAccountResources(); // ReleaseLogoSceneData (IDA)
+                return 0;
+
+            // IDA: Game_SceneUpdate (0x0051F900), errores de login 21..38.
+            // El estado 19 espera la respuesta: no abre un mensaje de error.
+            case 0x15: case 0x16: case 0x17: case 0x18:
+            case 0x19: case 0x1a: case 0x1b: case 0x1c: case 0x1d: case 0x1e:
+            case 0x1f: case 0x20: case 0x21: case 0x22: case 0x23: case 0x24:
+            case 0x25: case 0x26:
+                if (respCode == 0x15) {
+                    InputIndex = 1;
+                } else {
+                    InputIndex = 0;
+                    if (respCode == 0) {
+                        LoginSubState = 2;
+                        NextErrorMessage = MESSAGE_NONE; CurrentProtocolState = 2; ErrorMessage = slotB;
+                        break;
+                    }
+                }
+                if (slotA == 0) {
+                    LoginSubState = 2; CurrentProtocolState = 2; ErrorMessage = respCode;
+                } else {
+                    LoginSubState = 2; CurrentProtocolState = 2; NextErrorMessage = respCode;
+                }
+                break;
+
+            case 0x3c: // 0x3e
+                CurrentProtocolState = 2;
+                LoginSubState = 8;
+                PlayBuffer(0x1b, 0, 0);
+                ClearInput(1);
+                InputNumber = 2;
+                InputResidentNumber = 1;
+                InputTextMax = 0x1e;
+                _DAT_00559c98 = 0xe;
+                InputTextHide[1] = 2;
+                return 0;
+
+            case 0x3d: // 0x3f
+                if (respCode != 0) goto state_alt_error;
+                LoginSubState = 2; NextErrorMessage = MESSAGE_NONE; CurrentProtocolState = 2; ErrorMessage = slotB;
+                break;
+
+            // Success variants 0x40-0x47
+            case 0x3e: case 0x3f: case 0x40: case 0x41:
+            case 0x42: case 0x43: case 0x44: case 0x45:
+                if (respCode == 0) {
+                    NextErrorMessage = MESSAGE_NONE;
+                } else {
+                    int r = respCode;
+                    if (slotA != 0) { NextErrorMessage = respCode; r = slotA; }
+                    ErrorMessage = r;
+                }
+                CurrentProtocolState = 2;
+                LoginSubState = 2;
+                PlayBuffer(0x1b, 0, 0);
+                ClearInput(1);
+                {
+                    int vlen = (int)strlen((char*)g_szSavedUsername);
+                    memcpy(InputText, g_szSavedUsername, vlen + 1);
+                    InputTextHide[1] = 1;
+                    InputNumber = 2;
+                    InputLength[0] = (int)vlen;
+                    InputTextMax = 10;
+                    _DAT_00559c98 = 10;
+                    InputIndex = (vlen != 0) ? 1 : 0;
+                }
+                return 10;
+
+            default:
+state_alt_error:
+                if (DAT_005616a0 == '\0' &&
+                    DAT_083a7c18 != 4 && DAT_083a7c18 != 10 &&
+                    DAT_083a7c18 != 6 && DAT_083a7c18 != 1 &&
+                    DAT_083a7c18 != 0xc)
+                {
+                    return DAT_083a7c18;
+                }
+                DAT_005616a0 = '\0';
+                LoginSubState = DAT_083a7c18;
+                break;
+            }
+
+            PlayBuffer(0x1b, 0, 0);
+            break;
+
+        case 2:  // state 4
+        case 4:  // state 6
+        case 6:  // state 8
+        case 8:  // state 10
+            // Ease dialog down to Y=0x93
+            iVar11 = (0x93 - DAT_005616a4) * 0x55555556;
+            DAT_005616a4 += (0x93 - DAT_005616a4) / 3;
+            break;
+        }
+
+        return iVar11;
+    }
+}

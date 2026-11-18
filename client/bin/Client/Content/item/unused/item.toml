@@ -1,0 +1,4 @@
+# Modelos y texturas de Data/Item que el 0.97k no carga: items de versiones
+# posteriores (Dark Lord, anillos y collares elementales, Kundun...).
+# Siguen registrados para que el contenido custom pueda usarlos.
+source = "Item"

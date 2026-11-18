@@ -55,7 +55,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>..\Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.;..\Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
@@ -81,7 +81,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>..\Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.;..\Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -117,12 +117,17 @@
     <ClInclude Include="ChaosBox.h" />
     <ClInclude Include="CommandManager.h" />
     <ClInclude Include="Connection.h" />
-    <ClInclude Include="Console.h" />
-    <ClInclude Include="CriticalSection.h" />
+    <ClInclude Include="..\Common\Console.h" />
+    <ClInclude Include="..\Common\CriticalSection.h" />
     <ClInclude Include="CustomNpcMove.h" />
     <ClInclude Include="CustomPkFree.h" />
     <ClInclude Include="CustomSafeZone.h" />
     <ClInclude Include="ContentCatalog.h" />
+    <ClInclude Include="..\Common\ServerIdentity.h" />
+    <ClInclude Include="SecureLink.h" />
+    <ClInclude Include="..\Common\SecureChannel.h" />
+    <ClInclude Include="..\Common\SecureRandom.h" />
+    <ClInclude Include="..\Common\monocypher\monocypher.h" />
     <ClInclude Include="CustomPet.h" />
     <ClInclude Include="CustomWing.h" />
     <ClInclude Include="JsonLite.h" />
@@ -148,7 +153,8 @@
     <ClInclude Include="HackCheck.h" />
     <ClInclude Include="HackPacketCheck.h" />
     <ClInclude Include="InvasionManager.h" />
-    <ClInclude Include="IpManager.h" />
+    <ClInclude Include="..\Common\IpManager.h" />
+    <ClInclude Include="IpManagerServer.h" />
     <ClInclude Include="Item.h" />
     <ClInclude Include="ItemBag.h" />
     <ClInclude Include="ItemBagEx.h" />
@@ -161,16 +167,17 @@
     <ClInclude Include="ItemStack.h" />
     <ClInclude Include="ItemValue.h" />
     <ClInclude Include="JSProtocol.h" />
-    <ClInclude Include="Log.h" />
+    <ClInclude Include="..\Common\Log.h" />
+    <ClInclude Include="LogTypes.h" />
     <ClInclude Include="Map.h" />
     <ClInclude Include="MapItem.h" />
     <ClInclude Include="MapManager.h" />
     <ClInclude Include="MapPath.h" />
-    <ClInclude Include="Math.h" />
+    <ClInclude Include="GameMath.h" />
     <ClInclude Include="MemoryAllocator.h" />
     <ClInclude Include="MemoryAllocatorInfo.h" />
     <ClInclude Include="Message.h" />
-    <ClInclude Include="MiniDump.h" />
+    <ClInclude Include="..\Common\MiniDump.h" />
     <ClInclude Include="Monster.h" />
     <ClInclude Include="MonsterManager.h" />
     <ClInclude Include="MonsterSetBase.h" />
@@ -183,20 +190,20 @@
     <ClInclude Include="Party.h" />
     <ClInclude Include="Path.h" />
     <ClInclude Include="Protocol.h" />
-    <ClInclude Include="ProtocolDefines.h" />
+    <ClInclude Include="..\Common\ProtocolDefines.h" />
     <ClInclude Include="Quest.h" />
     <ClInclude Include="QuestObjective.h" />
     <ClInclude Include="QuestReward.h" />
     <ClInclude Include="Queue.h" />
     <ClInclude Include="QueueTimer.h" />
     <ClInclude Include="RandomManager.h" />
-    <ClInclude Include="ReadScript.h" />
+    <ClInclude Include="..\Common\ReadScript.h" />
     <ClInclude Include="Reconnect.h" />
     <ClInclude Include="ResetTable.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="ScheduleManager.h" />
     <ClInclude Include="SerialCheck.h" />
-    <ClInclude Include="ServerDisplayer.h" />
+    <ClInclude Include="..\Common\ServerDisplayer.h" />
     <ClInclude Include="ServerInfo.h" />
     <ClInclude Include="Shop.h" />
     <ClInclude Include="ShopManager.h" />
@@ -204,11 +211,13 @@
     <ClInclude Include="SkillHitBox.h" />
     <ClInclude Include="SkillManager.h" />
     <ClInclude Include="SocketManager.h" />
-    <ClInclude Include="SocketManagerUdp.h" />
+    <ClInclude Include="..\Common\SocketManagerUdp.h" />
+    <ClInclude Include="SocketManagerUdpServer.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="Trade.h" />
     <ClInclude Include="User.h" />
     <ClInclude Include="Util.h" />
+    <ClInclude Include="..\Common\UtilCommon.h" />
     <ClInclude Include="Viewport.h" />
     <ClInclude Include="Warehouse.h" />
   </ItemGroup>
@@ -223,12 +232,20 @@
     <ClCompile Include="ChaosBox.cpp" />
     <ClCompile Include="CommandManager.cpp" />
     <ClCompile Include="Connection.cpp" />
-    <ClCompile Include="Console.cpp" />
-    <ClCompile Include="CriticalSection.cpp" />
+    <ClCompile Include="..\Common\Console.cpp" />
+    <ClCompile Include="..\Common\CriticalSection.cpp" />
     <ClCompile Include="CustomNpcMove.cpp" />
     <ClCompile Include="CustomPkFree.cpp" />
     <ClCompile Include="CustomSafeZone.cpp" />
     <ClCompile Include="ContentCatalog.cpp" />
+    <ClCompile Include="..\Common\ServerIdentity.cpp" />
+    <ClCompile Include="SecureLink.cpp" />
+    <ClCompile Include="..\Common\SecureChannel.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Common\monocypher\monocypher.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="CustomPet.cpp" />
     <ClCompile Include="CustomWing.cpp" />
     <ClCompile Include="DefaultClassInfo.cpp" />
@@ -253,7 +270,7 @@
     <ClCompile Include="HackCheck.cpp" />
     <ClCompile Include="HackPacketCheck.cpp" />
     <ClCompile Include="InvasionManager.cpp" />
-    <ClCompile Include="IpManager.cpp" />
+    <ClCompile Include="..\Common\IpManager.cpp" />
     <ClCompile Include="Item.cpp" />
     <ClCompile Include="ItemBag.cpp" />
     <ClCompile Include="ItemBagEx.cpp" />
@@ -266,16 +283,16 @@
     <ClCompile Include="ItemStack.cpp" />
     <ClCompile Include="ItemValue.cpp" />
     <ClCompile Include="JSProtocol.cpp" />
-    <ClCompile Include="Log.cpp" />
+    <ClCompile Include="..\Common\Log.cpp" />
     <ClCompile Include="Map.cpp" />
     <ClCompile Include="MapItem.cpp" />
     <ClCompile Include="MapManager.cpp" />
     <ClCompile Include="MapPath.cpp" />
-    <ClCompile Include="Math.cpp" />
+    <ClCompile Include="GameMath.cpp" />
     <ClCompile Include="MemoryAllocator.cpp" />
     <ClCompile Include="MemoryAllocatorInfo.cpp" />
     <ClCompile Include="Message.cpp" />
-    <ClCompile Include="MiniDump.cpp" />
+    <ClCompile Include="..\Common\MiniDump.cpp" />
     <ClCompile Include="Monster.cpp" />
     <ClCompile Include="MonsterManager.cpp" />
     <ClCompile Include="MonsterSetBase.cpp" />
@@ -291,10 +308,10 @@
     <ClCompile Include="Quest.cpp" />
     <ClCompile Include="QuestObjective.cpp" />
     <ClCompile Include="QuestReward.cpp" />
-    <ClCompile Include="Queue.cpp" />
+    <ClCompile Include="..\Common\Queue.cpp" />
     <ClCompile Include="QueueTimer.cpp" />
     <ClCompile Include="RandomManager.cpp" />
-    <ClCompile Include="ReadScript.cpp" />
+    <ClCompile Include="..\Common\ReadScript.cpp" />
     <ClCompile Include="Reconnect.cpp" />
     <ClCompile Include="ResetTable.cpp" />
     <ClCompile Include="ScheduleManager.cpp" />
@@ -307,7 +324,25 @@
     <ClCompile Include="SkillHitBox.cpp" />
     <ClCompile Include="SkillManager.cpp" />
     <ClCompile Include="SocketManager.cpp" />
-    <ClCompile Include="SocketManagerUdp.cpp" />
+    <ClCompile Include="..\Common\SocketManagerUdp.cpp" />
+    <ClCompile Include="..\Common\EventInvasions.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Common\MapInfo.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Common\ItemDrops.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Common\ItemExtras.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Common\MapGates.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Common\MapZones.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="..\Common\MapSpawns.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -325,6 +360,7 @@
     <ClCompile Include="Trade.cpp" />
     <ClCompile Include="User.cpp" />
     <ClCompile Include="Util.cpp" />
+    <ClCompile Include="..\Common\UtilCommon.cpp" />
     <ClCompile Include="Viewport.cpp" />
     <ClCompile Include="Warehouse.cpp" />
   </ItemGroup>

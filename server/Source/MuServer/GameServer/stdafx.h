@@ -13,6 +13,8 @@
 
 #include "../Common/Platform.h"
 #include "../Common/TextField.h"
+#include "../Common/ProtocolVersion.h"
+#include "../Common/RejectReason.h"
 #include "../Common/TextName.h"
 
 // System includes

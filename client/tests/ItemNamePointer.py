@@ -13,6 +13,12 @@ import tempfile
 from ItemConvertPointer import harness as convert_harness, SERVICES
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 BACKEND = r'''
 #include <string>
 #ifndef _WIN32
@@ -140,10 +146,10 @@ def harness(revision=None, high_fonts=False):
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
     prefix+=re.search(r"struct _SkillAttrEntry[^\n]+",header).group()+"\n_SkillAttrEntry SkillAttribute;\nalignas(MONSTER_SCRIPT) BYTE MonsterScript[512*54];\n"
     name="DAT_055c9e44"
-    prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-    prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
+    prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+    prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
     prefix+=re.search(r"static __forceinline [^\n]*\bItemAttribute_Base\([^\{]*\{.*?^\}",header,re.M|re.S).group()
-    render=function(read_source("src/Item/Item_Display.cpp",revision),"RenderItemName")
+    render=function(read_source("src/ui/inventory/Item_Display.cpp",revision),"RenderItemName")
     arg="object" if "const OBJECT*" in render.split("{",1)[0] else "static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(object))"
     return prefix+render+MAIN.replace("ARG",arg).replace("HIGH_FONTS","true" if high_fonts else "false")
 

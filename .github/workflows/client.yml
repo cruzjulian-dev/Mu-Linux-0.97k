@@ -1,10 +1,13 @@
 name: Client
 on:
   push:
-    branches: [ "fase/*", "platform/**", "main" ]
+    branches: [ "fase/*", "release/*", "platform/**", "main" ]
     tags: [ "*" ]
+  # Todo PR, como el del server: las ramas de tema van a release/* y antes
+  # el cliente no corria ahi (habia que lanzarlo a mano y el resultado no
+  # quedaba en el PR). El filtro de carpetas de `changes` evita compilar
+  # cuando el PR no toca client/.
   pull_request:
-    branches: [ "fase/*", "main" ]
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,7 +33,7 @@ jobs:
       client: ${{ steps.filter.outputs.client == 'true' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v5
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -51,7 +54,7 @@ jobs:
           - { name: linux-x86, os: ubuntu-22.04 }
         config: [ Debug, Release ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Verificar que Mana Shield no se transfiera al reutilizar un slot
         if: matrix.config == 'Release'
         run: python -B tests/ManaShieldSlotReuse.py
@@ -63,6 +66,7 @@ jobs:
       - name: Verificar fuentes
         run: |
           python .github/scripts/check_cmake_sources.py
+          python .github/scripts/check_shared_sources.py
           python .github/scripts/check_bmd_boundary.py
           python .github/scripts/check_render_layer.py
       - name: Verificar destinos de mass teleport
@@ -109,7 +113,7 @@ jobs:
         run: cmake -S . -B build -G Ninja -DMU_PLATFORM_BACKEND=SDL3 -DMU_PLATFORM_ONLY=OFF -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux-x86.cmake -DCMAKE_BUILD_TYPE=${{ matrix.config }}
       - name: Verificar crecimiento de recursos
         run: |
-          cmake --build build --config ${{ matrix.config }} --target mu_resource_tables_test mu_frame_pointer_set_test mu_text_core_test mu_text_shaper_test mu_transform_workers_test mu_render_profile_test mu_render_profile_flow_test mu_terrain_draw_flow_test mu_bmd_device_test mu_panel_anchor_test --parallel 4
+          cmake --build build --config ${{ matrix.config }} --target mu_resource_tables_test mu_frame_pointer_set_test mu_server_trust_test mu_secure_channel_test mu_content_sync_test mu_content_layers_list_test mu_text_core_test mu_text_shaper_test mu_transform_workers_test mu_render_profile_test mu_render_profile_flow_test mu_terrain_draw_flow_test mu_bmd_device_test mu_panel_anchor_test --parallel 4
           ctest --test-dir build -C ${{ matrix.config }} -E bmd_device --output-on-failure
       - name: Verificar BMD con Mesa (sin pantalla física)
         if: runner.os == 'Linux'
@@ -136,7 +140,7 @@ jobs:
           objdump -T build/bin/main > build/symbols.txt
           ldd build/bin/main > build/ldd.txt
           python3 .github/scripts/package_linux.py build dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: runner.os == 'Linux' && matrix.config == 'Release'
         with:
           name: mu97k-linux-release
@@ -145,7 +149,7 @@ jobs:
             client/build/symbols.txt
             client/build/ldd.txt
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: sdl3-${{ matrix.target.name }}-${{ matrix.config }}
           path: |
@@ -166,21 +170,44 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Preparar vcpkg
         shell: bash
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          # vcpkg en el commit del baseline y no en master: el ABI de cada paquete
+          # incluye los scripts de vcpkg, y con master cambiaba en cada actualización.
+          baseline=$(python ../.github/scripts/vcpkg_cache.py baseline)
+          git init -q "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" fetch -q --depth 1 https://github.com/microsoft/vcpkg.git "$baseline"
+          git -C "$VCPKG_ROOT" checkout -q FETCH_HEAD
           "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
       - name: Caché de binarios de vcpkg
-        uses: actions/cache@v4
+        id: vcpkg-restore
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/vcpkg-cache
-          key: vcpkg-x64-windows-mu-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json', 'client/cmake/triplets/x64-windows-mu.cmake') }}
-          restore-keys: vcpkg-x64-windows-mu-
+          key: vcpkg-x64-windows-mu-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json', 'client/cmake/triplets/x64-windows-mu.cmake') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-x64-windows-mu-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json', 'client/cmake/triplets/x64-windows-mu.cmake') }}-
+            vcpkg-x64-windows-mu-
+      - name: Marcar el inicio de vcpkg
+        shell: bash
+        run: touch "$RUNNER_TEMP/vcpkg-marker"
       - name: Configurar
         run: cmake --preset windows-sdl3-x64-release
+      # Sólo los paquetes que usa este build; se vuelve a subir si se compiló algo
+      # nuevo o se borró algo viejo (la clave lleva el run_id, así que no se pisa).
+      - name: Podar la caché de vcpkg
+        id: vcpkg-prune
+        shell: bash
+        run: python ../.github/scripts/vcpkg_cache.py prune build/windows-sdl3-x64-release/vcpkg_installed/vcpkg/status "$VCPKG_DEFAULT_BINARY_CACHE" "$RUNNER_TEMP/vcpkg-marker"
+      - name: Guardar la caché de vcpkg
+        if: steps.vcpkg-prune.outputs.changed == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/vcpkg-cache
+          key: ${{ steps.vcpkg-restore.outputs.cache-primary-key }}
       - name: Compilar
         run: cmake --build --preset windows-sdl3-x64-release --parallel 4
       - name: Verificar que no haya DLL propias
@@ -189,7 +216,7 @@ jobs:
           shopt -s nullglob
           dlls=(bin/Client/*.dll)
           if [ ${#dlls[@]} -ne 0 ]; then echo "DLL junto al ejecutable: ${dlls[*]}"; exit 1; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: webgpu-windows-x64-Release
           path: client/bin/Client/main.exe
@@ -208,27 +235,50 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Dependencias de sistema
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libx11-xcb-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libegl-dev libasound2-dev libpulse-dev libwayland-dev libxkbcommon-dev libdecor-0-dev wayland-protocols libvulkan-dev ninja-build pkg-config xvfb xauth gdb libgl1-mesa-dri
       - name: Preparar vcpkg
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          # vcpkg en el commit del baseline y no en master: el ABI de cada paquete
+          # incluye los scripts de vcpkg, y con master cambiaba en cada actualización.
+          baseline=$(python3 ../.github/scripts/vcpkg_cache.py baseline)
+          git init -q "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" fetch -q --depth 1 https://github.com/microsoft/vcpkg.git "$baseline"
+          git -C "$VCPKG_ROOT" checkout -q FETCH_HEAD
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
       - name: Caché de binarios de vcpkg
-        uses: actions/cache@v4
+        id: vcpkg-restore
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/vcpkg-cache
-          key: vcpkg-x64-linux-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json') }}
-          restore-keys: vcpkg-x64-linux-
+          key: vcpkg-x64-linux-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-x64-linux-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json') }}-
+            vcpkg-x64-linux-
+      - name: Marcar el inicio de vcpkg
+        shell: bash
+        run: touch "$RUNNER_TEMP/vcpkg-marker"
       - name: Configurar
         run: cmake --preset linux-x64-release
+      # Sólo los paquetes que usa este build; se vuelve a subir si se compiló algo
+      # nuevo o se borró algo viejo (la clave lleva el run_id, así que no se pisa).
+      - name: Podar la caché de vcpkg
+        id: vcpkg-prune
+        shell: bash
+        run: python3 ../.github/scripts/vcpkg_cache.py prune build/linux-x64-release/vcpkg_installed/vcpkg/status "$VCPKG_DEFAULT_BINARY_CACHE" "$RUNNER_TEMP/vcpkg-marker"
+      - name: Guardar la caché de vcpkg
+        if: steps.vcpkg-prune.outputs.changed == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/vcpkg-cache
+          key: ${{ steps.vcpkg-restore.outputs.cache-primary-key }}
       - name: Pruebas unitarias
         run: |
-          cmake --build build/linux-x64-release --target mu_resource_tables_test mu_frame_pointer_set_test mu_text_core_test mu_text_shaper_test mu_transform_workers_test mu_render_profile_test mu_render_profile_flow_test mu_terrain_draw_flow_test mu_bmd_device_test mu_panel_anchor_test --parallel 4
+          cmake --build build/linux-x64-release --target mu_resource_tables_test mu_frame_pointer_set_test mu_server_trust_test mu_secure_channel_test mu_content_sync_test mu_content_layers_list_test mu_text_core_test mu_text_shaper_test mu_transform_workers_test mu_render_profile_test mu_render_profile_flow_test mu_terrain_draw_flow_test mu_bmd_device_test mu_panel_anchor_test --parallel 4
           ctest --test-dir build/linux-x64-release -E bmd_device --output-on-failure
       - name: Verificar BMD con Mesa (sin pantalla física)
         env:
@@ -243,7 +293,7 @@ jobs:
           objdump -T build/linux-x64-release/bin/main > build/linux-x64-release/symbols.txt
           ldd build/linux-x64-release/bin/main > build/linux-x64-release/ldd.txt
           python3 .github/scripts/package_linux.py build/linux-x64-release dist --arch x64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: mu97k-linux-x64-release
           path: |
@@ -303,17 +353,40 @@ jobs:
       - uses: actions/checkout@v5
       - name: Preparar vcpkg
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          # vcpkg en el commit del baseline y no en master: el ABI de cada paquete
+          # incluye los scripts de vcpkg, y con master cambiaba en cada actualización.
+          baseline=$(python3 ../.github/scripts/vcpkg_cache.py baseline)
+          git init -q "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" fetch -q --depth 1 https://github.com/microsoft/vcpkg.git "$baseline"
+          git -C "$VCPKG_ROOT" checkout -q FETCH_HEAD
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
       - name: Caché de binarios de vcpkg
-        uses: actions/cache@v4
+        id: vcpkg-restore
+        uses: actions/cache/restore@v5
         with:
           path: vcpkg-cache
-          key: vcpkg-x64-mingw-mu-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json', 'client/cmake/triplets/x64-mingw-mu.cmake', 'client/cmake/triplets/mingw-include/**') }}
-          restore-keys: vcpkg-x64-mingw-mu-
+          key: vcpkg-x64-mingw-mu-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json', 'client/cmake/triplets/x64-mingw-mu.cmake', 'client/cmake/triplets/mingw-include/**') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-x64-mingw-mu-${{ hashFiles('client/vcpkg.json', 'client/vcpkg-configuration.json', 'client/cmake/triplets/x64-mingw-mu.cmake', 'client/cmake/triplets/mingw-include/**') }}-
+            vcpkg-x64-mingw-mu-
+      - name: Marcar el inicio de vcpkg
+        shell: bash
+        run: touch "$RUNNER_TEMP/vcpkg-marker"
       - name: Configurar
         run: cmake --preset mingw-x64-webgpu-release
+      # Sólo los paquetes que usa este build; se vuelve a subir si se compiló algo
+      # nuevo o se borró algo viejo (la clave lleva el run_id, así que no se pisa).
+      - name: Podar la caché de vcpkg
+        id: vcpkg-prune
+        shell: bash
+        run: python3 ../.github/scripts/vcpkg_cache.py prune build/mingw-x64-webgpu-release/vcpkg_installed/vcpkg/status "$VCPKG_DEFAULT_BINARY_CACHE" "$RUNNER_TEMP/vcpkg-marker"
+      - name: Guardar la caché de vcpkg
+        if: steps.vcpkg-prune.outputs.changed == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: vcpkg-cache
+          key: ${{ steps.vcpkg-restore.outputs.cache-primary-key }}
       - name: Compilar
         run: cmake --build --preset mingw-x64-webgpu-release --target mu97k --parallel 4
       - name: Verificar que no dependa de las DLL de MinGW
@@ -329,7 +402,10 @@ jobs:
   result:
     name: Client
     if: always()
-    needs: [changes, backend, webgpu, linux-x64, mingw, mingw-webgpu]
+    # MinGW queda fuera: depende de bajar paquetes de apt y si los mirrors de
+    # Ubuntu no responden (2026-11-11) tumbaba el check obligatorio. Sigue
+    # corriendo y se ve en el PR, pero no bloquea el merge.
+    needs: [changes, backend, webgpu, linux-x64]
     runs-on: ubuntu-24.04
     defaults:
       run:

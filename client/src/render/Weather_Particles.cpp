@@ -1,0 +1,316 @@
+#include <cstdint>
+// Weather_Particles.cpp — IDA: MoveLeaves @ 0x0046cc80 — WeatherParticles_Update
+// Per-frame weather particle pool tick.
+//
+// Iterates a particle pool at DAT_07c5ab5c (pointer to base), stride 0x70 bytes
+// (pfVar10 advances by 0x1c floats = 0x70 bytes per entry).
+// Active count = iVar9, computed from World.
+//
+// Particle entry layout (relative to pfVar10 at offset +0x44 in entry):
+//   pfVar10[-0xb]  char   active flag (0=free, nonzero=alive)
+//   pfVar10[-0xa]  float  type_id    (1.4013e-43 = type0/normal, 1.41531e-43 = type2b,
+//                                     1.42932e-43 = snow/rain_fall)
+//   pfVar10[-9]    float  (unused in visible logic)
+//   pfVar10[-8]    float  drop_weight (5.0 normal, 10.0 heavy rain)
+//   pfVar10[-7]    float  pos_x
+//   pfVar10[-6]    float  pos_y
+//   pfVar10[-5]    float  pos_z
+//   pfVar10[-4]    float  vel_x (angle/dir for snow)
+//   pfVar10[-3]    float  vel_y
+//   pfVar10[-2]    float  vel_z
+//   pfVar10[-1]    float  color_r
+//   pfVar10[0]     float  color_g
+//   pfVar10[1]     float  color_b
+//   pfVar10[8..10] float  velocity xyz (integrated each frame)
+//   pfVar10[0xb..d] float angular velocity xyz (butterfly/bubble)
+//   pfVar10[0xe..10] float origin xyz (butterfly/bubble start pos)
+//
+// World values (World):
+//   0  = ServerSelect — butterfly/bubble floating around origin, deactivated at max dist
+//   2  = rain (light)  — falling drops, 1/10 chance heavy (drop_weight=10)
+//   3,7 = InGame map    — butterfly/bubble (same as 0)
+//   9  = logout/loading — snow: rotated velocity via Matrix_BuildFromEuler/4fa0b0,
+//                          splash effect (Particle_Spawn type 0x67/0x68) on ground hit
+//   10 = rain (dense)   — limited active count = (RainCurrent * 200) / 100
+//
+// Wind/environment per frame:
+//   RainSpeed = (int)(fsin(tick * _DAT_00552500) + 3) * 10     — wind X speed
+//   RainAngle  = (int)(fsin(tick * _DAT_00552a40 + offset) * 20) — rain Y offset
+//   RainPosition  = (RainPosition + 0x14) % 2000                   — rain Z counter
+//
+// Related: RainTarget = intensity target (set to 100 when substate→10)
+//          RainCurrent = current intensity (interpolated toward ae0 each frame)
+
+#include "stdafx.h"
+#include "game/core/RenderFxSnapshots.h"
+#pragma warning(disable: 4244 4101)
+#include "globals.h"
+#include "functions.h"
+#include <math.h>
+
+// fsin se define en stdafx.h como puente al seno de la CRT.
+// _rand is a macro defined as rand() in stdafx.h
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+void WeatherParticles_Update(void)
+{
+    int iVar7 = gMapManager.GetCurrentMap();   // World
+
+    // ── Intensity ramp for sub-state 10 (dense rain) ─────────────────────────
+    if (iVar7 == 10)
+        RainTarget = 100;
+    if (RainCurrent < (int)RainTarget)      RainCurrent++;
+    else if ((int)RainCurrent > (int)RainTarget) RainCurrent--;
+
+    // ── Per-frame wind / oscillation globals ─────────────────────────────────
+    // IDA MoveLeaves (0x46CC80):
+    //   RainSpeed = 10 * ((std::int64_t)sin(WorldTime * 0.001) + 3);
+    //   RainAngle = 20 * (std::int64_t)sin(WorldTime * 0.00050000002 + 50.0);
+    // (RainSpeed = RainSpeed, RainAngle = RainAngle.)
+    RainSpeed = (int)(10 * ((longlong)sin((double)WorldTime * 0.001) + 3));
+    RainAngle  = (int)(20 * (longlong)sin((double)WorldTime * 0.00050000002 + 50.0));
+
+    int iVar1 = RainPosition + 0x14;
+    RainPosition  = iVar1 % 2000;
+
+    // ── Compute active particle count ─────────────────────────────────────────
+    // IDA: iMaxLeaves = World != 9 ? 80 : 200;
+    int iVar9 = (iVar7 != 9) ? 80 : 200;
+    if (iVar9 < 1) return;
+
+    // ── Main particle loop ────────────────────────────────────────────────────
+    // IDA: for ( i = (float *)&unk_7C5AB5C; ; i += 28 )
+    // SkillEffect_Render lee el flag de activo desde esta misma base.
+    float *pfVar10 = (float *)&DAT_07c5ab5c;
+    int local_d4 = 0;
+
+    do {
+        if (*(char *)(pfVar10 - 0xb) == '\0')
+        {
+            RenderFxSnapshots_New(pfVar10-0xb);
+            // ── Spawn new particle ────────────────────────────────────────────
+            pfVar10[-1] = 1.0f; pfVar10[0] = 1.0f; pfVar10[1] = 1.0f;
+            *(char *)(pfVar10 - 0xb) = 1;
+
+            if (iVar7 == 9)
+            {
+                // Snow: rotated falling velocity via euler matrix
+                pfVar10[-10] = 1.42932e-43f;
+                // IDA: `if ((int)i >= (int)&unk_7C62E9C)` = slot 300 del pool
+                // (0x7C62E9C - 0x7C5AB5C = 300 * 0x70).  Con 200 hojas nunca se
+                // llega, pero la direccion absoluta comparaba contra otra memoria.
+                if (((char*)pfVar10 - (char*)&DAT_07c5ab5c) / 0x70 < 300) {
+                    pfVar10[-7] = (float)(_rand() % 0x640 - 800) + *(float *)(Hero + 0x10);
+                    pfVar10[-6] = (float)(_rand() % 0x578 - 500) + *(float *)(Hero + 0x14);
+                } else {
+                    pfVar10[-7] = (float)(_rand() % 0x640 - 800) + *(float *)(Hero + 0x10);
+                    pfVar10[-6] = ((float)(_rand() % 300 + 1000) + *(float *)(Hero + 0x14))
+                                  - (float)RainPosition;
+                }
+                pfVar10[-5] = (float)(_rand() % 200 + 300) + *(float *)(Hero + 0x18);
+
+                // random horizontal direction: even=left, odd=left+wind
+                unsigned int r = (unsigned int)_rand() & 0x80000001u;
+                if ((int)r < 0) r = (r - 1u | 0xfffffffeu) + 1u;
+                int vx;
+                if (r == 0) vx = -0x14 - _rand() % 0x14;
+                else        vx = (-0x1e  - _rand() % 0x14) - (int)RainAngle;
+
+                pfVar10[-4] = (float)vx;
+                pfVar10[-3] = 0.0f;
+                pfVar10[-2] = 0.0f;
+
+                float local_b4[3] = { 0.0f, 0.0f, -(float)(_rand() % 0x28 + RainSpeed) };
+                float mat[12], out[3];
+                Matrix_BuildFromEuler(pfVar10 - 4, mat);
+                Vector_Rotate(local_b4, mat, pfVar10 + 8);
+            }
+            else if (iVar7 == 0)
+            {
+                // Butterfly/bubble
+                pfVar10[-10] = 1.4013e-43f;
+                float fx = (float)(_rand() % 0x640 - 800) + *(float *)(Hero + 0x10);
+                float fy = (float)(_rand() % 0x578 - 500) + *(float *)(Hero + 0x14);
+                float fz = (float)(_rand() % 300 + 0x32)  + *(float *)(Hero + 0x18);
+                pfVar10[-7] = fx; pfVar10[-6] = fy; pfVar10[-5] = fz;
+                pfVar10[0xe] = fx; pfVar10[0xf] = fy; pfVar10[0x10] = fz;
+
+                // Random rotation angle
+                unsigned int ur = (unsigned int)_rand() & 0x8000003fu;
+                if ((int)ur < 0) ur = (ur - 1u | 0xffffffc0u) + 1u;
+                float ang = (float)(int)(ur + 0x40) * (-0.1f);
+                pfVar10[8] = ang;
+                if (fy < *(float *)&DAT_083a42d8 + 400.0f)
+                    pfVar10[8] = 3.2f - ang;
+
+                ur = (unsigned int)_rand() & 0x8000001fu; if ((int)ur < 0) ur = (ur-1u|0xffffffe0u)+1u;
+                pfVar10[9]  = (float)(int)(ur - 0x10) * 0.1f;
+                ur = (unsigned int)_rand() & 0x8000001fu; if ((int)ur < 0) ur = (ur-1u|0xffffffe0u)+1u;
+                pfVar10[10] = (float)(int)(ur - 0x10) * 0.1f;
+                ur = (unsigned int)_rand() & 0x8000000fu; if ((int)ur < 0) ur = (ur-1u|0xfffffff0u)+1u;
+                pfVar10[0xb] = (float)(int)(ur - 8) * 0.1f;
+                ur = (unsigned int)_rand() & 0x8000003fu; if ((int)ur < 0) ur = (ur-1u|0xffffffc0u)+1u;
+                pfVar10[0xc] = (float)(int)(ur - 0x20) * 0.1f;
+                ur = (unsigned int)_rand() & 0x8000000fu; if ((int)ur < 0) ur = (ur-1u|0xfffffff0u)+1u;
+                pfVar10[0xd] = (float)(int)(ur - 8) * 0.1f;
+            }
+            else if (iVar7 == 10)
+            {
+                // Dense rain: limited active count
+                if (local_d4 < ((int)RainCurrent * 200) / 100) {
+                    pfVar10[-10] = 1.42932e-43f;
+                    pfVar10[-7] = (float)(_rand() % 0x640 - 800) + *(float *)(Hero + 0x10);
+                    pfVar10[-6] = (float)(_rand() % 0x578 - 500) + *(float *)(Hero + 0x14);
+                    pfVar10[-4] = -30.0f; pfVar10[-3] = 0.0f; pfVar10[-2] = 0.0f;
+                    float fz2 = *(float *)(Hero + 0x18);
+                    pfVar10[-5] = (float)(_rand() % 200 + 200) + fz2;
+                    float loc[3] = { 0.0f, 0.0f, -(float)(_rand() % 0x18 + 0x14) };
+                    float mat[12];
+                    Matrix_BuildFromEuler(pfVar10 - 4, mat);
+                    Vector_Rotate(loc, mat, pfVar10 + 8);
+                }
+            }
+            else if (iVar7 == 2)
+            {
+                // Light rain (1/10 chance heavy)
+                pfVar10[-10] = 1.4013e-43f;
+                pfVar10[-8]  = 5.0f;
+                if (_rand() % 10 == 0) { pfVar10[-10] = 1.41531e-43f; pfVar10[-8] = 10.0f; }
+                pfVar10[-7] = (float)(_rand() % 0x640 - 800) + *(float *)(Hero + 0x10);
+                pfVar10[-6] = (float)(_rand() % 0x578 - 500) + *(float *)(Hero + 0x14);
+                float fz2   = *(float *)(Hero + 0x18);
+                pfVar10[-4] = -30.0f; pfVar10[-3] = 0.0f; pfVar10[-2] = 0.0f;
+                pfVar10[-5] = (float)(_rand() % 200 + 200) + fz2;
+                unsigned int ur = (unsigned int)_rand() & 0x8000000fu;
+                if ((int)ur < 0) ur = (ur - 1u | 0xfffffff0u) + 1u;
+                float loc[3] = { 0.0f, 0.0f, -(float)(int)(ur + 8) };
+                float mat[12];
+                Matrix_BuildFromEuler(pfVar10 - 4, mat);
+                Vector_Rotate(loc, mat, pfVar10 + 8);
+            }
+            else if (iVar7 == 3 || iVar7 == 7)
+            {
+                // Butterfly/bubble (in-game map states) — same as state 0
+                pfVar10[-10] = 1.4013e-43f;
+                float fx = (float)(_rand() % 0x640 - 800) + *(float *)(Hero + 0x10);
+                float fy = (float)(_rand() % 0x578 - 500) + *(float *)(Hero + 0x14);
+                float fz = (float)(_rand() % 300 + 0x32)  + *(float *)(Hero + 0x18);
+                pfVar10[-7] = fx; pfVar10[-6] = fy; pfVar10[-5] = fz;
+                pfVar10[0xe] = fx; pfVar10[0xf] = fy; pfVar10[0x10] = fz;
+                unsigned int ur;
+                ur = (unsigned int)_rand() & 0x8000003fu; if ((int)ur<0) ur=(ur-1u|0xffffffc0u)+1u;
+                float ang = (float)(int)(ur + 0x40) * (-0.1f);
+                pfVar10[8] = ang;
+                if (fy < *(float *)&DAT_083a42d8 + 400.0f) pfVar10[8] = 3.2f - ang;
+                ur=(unsigned int)_rand()&0x8000001fu; if((int)ur<0)ur=(ur-1u|0xffffffe0u)+1u; pfVar10[9]  =(float)(int)(ur-0x10)*0.1f;
+                ur=(unsigned int)_rand()&0x8000001fu; if((int)ur<0)ur=(ur-1u|0xffffffe0u)+1u; pfVar10[10] =(float)(int)(ur-0x10)*0.1f;
+                ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u; pfVar10[0xb]=(float)(int)(ur-8)*0.1f;
+                ur=(unsigned int)_rand()&0x8000003fu; if((int)ur<0)ur=(ur-1u|0xffffffc0u)+1u; pfVar10[0xc]=(float)(int)(ur-0x20)*0.1f;
+                ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u; pfVar10[0xd]=(float)(int)(ur-8)*0.1f;
+            }
+        }
+        else
+        {
+            // ── Update active particle ────────────────────────────────────────
+            if (iVar7 == 9)
+            {
+                // Snow: integrate velocity
+                pfVar10[-7] += pfVar10[8];
+                pfVar10[-6] += pfVar10[9];
+                pfVar10[-5] += pfVar10[10];
+                float terZ = RequestTerrainHeight(pfVar10[-7], pfVar10[-6]);
+                if (pfVar10[-5] < terZ) {
+                    *(char *)(pfVar10 - 0xb) = 0;
+                    pfVar10[-5] = terZ + (float)10.0f;
+                    unsigned int r = (unsigned int)_rand() & 0x80000003u;
+                    if ((int)r < 0) r = (r - 1u | 0xfffffffcu) + 1u;
+                    if (r == 0)
+                        Particle_Spawn(0x67, pfVar10 - 7, pfVar10 - 4, pfVar10 - 1, 0, 1.0f, 0);
+                    else
+                        Particle_Spawn(0x68, pfVar10 - 7, pfVar10 - 4, pfVar10 - 1, 0, 1.0f, 0);
+                }
+            }
+
+            if (iVar7 == 0 || iVar7 == 10)
+            {
+                if (pfVar10[-10] == 1.42932e-43f)
+                {
+                    // Rain/snow falling: integrate
+                    pfVar10[-7] += pfVar10[8];
+                    pfVar10[-6] += pfVar10[9];
+                    pfVar10[-5] += pfVar10[10];
+                    float terZ = RequestTerrainHeight(pfVar10[-7], pfVar10[-6]);
+                    if (pfVar10[-5] < terZ) {
+                        *(char *)(pfVar10 - 0xb) = 0;
+                        pfVar10[-5] = terZ + (float)10.0f;
+                        if (iVar7 != 10)
+                            Particle_Spawn(0x67, pfVar10 - 7, pfVar10 - 4, pfVar10 - 1, 0, 1.0f, 0);
+                    }
+                }
+                else
+                {
+                    // Butterfly: random drift + distance limit
+                    unsigned int ur;
+                    ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u;
+                    pfVar10[8]  += (float)(int)(ur-8) * 0.1f;
+                    ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u;
+                    pfVar10[9]  += (float)(int)(ur-8) * 0.1f;
+                    ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u;
+                    float vz = (float)(int)(ur-8)*0.1f + pfVar10[10];
+                    pfVar10[10] = vz;
+                    pfVar10[-7] += pfVar10[8];
+                    pfVar10[-6] += pfVar10[9];
+                    pfVar10[-5] += vz;
+
+                    ur=(unsigned int)_rand()&0x80000007u; if((int)ur<0)ur=(ur-1u|0xfffffff8u)+1u;
+                    pfVar10[0xb] += (float)(int)(ur-4)*0.02f;
+                    ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u;
+                    pfVar10[0xc] += (float)(int)(ur-8)*0.02f;
+                    ur=(unsigned int)_rand()&0x80000007u; if((int)ur<0)ur=(ur-1u|0xfffffff8u)+1u;
+                    float az = (float)(int)(ur-4)*0.02f + pfVar10[0xd];
+                    pfVar10[0xd] = az;
+                    pfVar10[-4] += pfVar10[0xb];
+                    pfVar10[-3] += pfVar10[0xc];
+                    pfVar10[-2] += az;
+
+                    // Deactivate if too far from origin
+                    float dx = pfVar10[0xe]-pfVar10[-7], dy = pfVar10[0xf]-pfVar10[-6], dz = pfVar10[0x10]-pfVar10[-5];
+                    if (200000.0f <= dx*dx + dy*dy + dz*dz)
+                        *(char *)(pfVar10 - 0xb) = 0;
+                }
+            }
+            else
+            {
+                // Other states: fall if above terrain; fade alpha when on ground
+                float terZ = RequestTerrainHeight(pfVar10[-7], pfVar10[-6]);
+                if (terZ < pfVar10[-5]) {
+                    // still falling
+                    unsigned int ur;
+                    ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u;
+                    pfVar10[8]  += (float)(int)(ur-8)*0.1f;
+                    ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u;
+                    pfVar10[9]  += (float)(int)(ur-8)*0.1f;
+                    ur=(unsigned int)_rand()&0x8000000fu; if((int)ur<0)ur=(ur-1u|0xfffffff0u)+1u;
+                    float vz = (float)(int)(ur-8)*0.1f + pfVar10[10];
+                    pfVar10[10] = vz;
+                    pfVar10[-7] += pfVar10[8];
+                    pfVar10[-6] += pfVar10[9];
+                    pfVar10[-5] += vz;
+                } else {
+                    // on ground: fade RGB and deactivate
+                    pfVar10[-5] = terZ;
+                    pfVar10[-1] -= 0.05f;
+                    pfVar10[0]  -= 0.05f;
+                    pfVar10[1]  -= 0.05f;
+                    if (pfVar10[-1] <= 0.0f)
+                        *(char *)(pfVar10 - 0xb) = 0;
+                }
+            }
+        }
+
+        pfVar10 += 0x1c;
+        local_d4++;
+        iVar7 = gMapManager.GetCurrentMap();
+    } while (local_d4 < iVar9);
+}

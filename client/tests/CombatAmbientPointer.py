@@ -13,6 +13,12 @@ import tempfile
 from ItemResetPointer import harness as reset_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 int randomValues[2], randomIndex=0, calls=0, actualFlag, actualMode;
 float actualVectors[9], actualAlpha;
@@ -43,8 +49,8 @@ std::uint64_t Run(BYTE* memory) {
         Call(object); const bool emit=object->CurrentAction==2;
         Require(calls==(emit?1:0) && randomIndex==(emit?2:0) && std::memcmp(before,memory,sizeof(before))==0);
         if(emit) {
-            const float x=(static_cast<float>(randomValues[0]%200)+object->Position[0])-_DAT_005524f0;
-            const float y=(static_cast<float>(randomValues[1]%200)+object->Position[1])-_DAT_005524f0;
+            const float x=(static_cast<float>(randomValues[0]%200)+object->Position[0])-100.0f;
+            const float y=(static_cast<float>(randomValues[1]%200)+object->Position[1])-100.0f;
             const float expected[]={x,object->Position[1],object->Position[2],1.0f,1.0f,0.0f,x,y,0.0f};
             Require(std::memcmp(actualVectors,expected,sizeof(expected))==0 && static_cast<DWORD>(actualFlag)==z && actualAlpha==0.0f && actualMode==randomValues[1]%200);
         }
@@ -71,9 +77,9 @@ def harness(revision=None):
     prefix = reset_harness(revision).split("int ItemObjectAttributeImpl(", 1)[0]
     name = "_DAT_005524f0"
     header, definitions = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
-    prefix += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
-    prefix += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M).group()
-    body = function(read_source("src/Combat/Combat_AttackStage.cpp", revision), "Combat_SpawnIdleAmbientParticle")
+    prefix += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
+    prefix += optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M))
+    body = function(read_source("src/game/combat/Combat_AttackStage.cpp", revision), "Combat_SpawnIdleAmbientParticle")
     arg = "object" if "OBJECT* object" in body else "static_cast<int>(reinterpret_cast<std::uintptr_t>(object))"
     return prefix + SERVICES + body + MAIN.replace("ARG", arg)
 

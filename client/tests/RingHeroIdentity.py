@@ -9,17 +9,17 @@ from pathlib import Path
 from SceneObjectPointer import read_source,build_and_run
 
 def harness(negative=False):
-    header=read_source('src/Entity/EntityTypes.h')
+    header=read_source('src/game/entity/EntityTypes.h')
     records='\n'.join(re.search(r'struct '+n+r'\s*\{.*?\n\};',header,re.S).group() for n in ('OBJECT','PART_t','CHARACTER'))
-    source=read_source('src/Net/Recv/Recv_Viewport.cpp')
+    source=read_source('src/net/Recv/Recv_Viewport.cpp')
     start=source.index('            if (hero) {',source.index('if (entityId == g_HeroKey'))
     end=source.index('            NetLog("NET:    0x12 own HeroKey=',start)
     branch=source[start:end]
     if negative:
         assert branch.count('EntityName::Set(hero, name);')==1
         branch=branch.replace('EntityName::Set(hero, name);','')
-    names=read_source('src/Entity/EntityName.cpp');names=names[names.index('namespace EntityName {'):]
-    assert 'EntityName::Clear(param_1);' in read_source('src/Entity/Entity_Spawn.cpp')
+    names=read_source('src/game/entity/EntityName.cpp');names=names[names.index('namespace EntityName {'):]
+    assert 'EntityName::Clear(param_1);' in read_source('src/game/entity/Entity_Spawn.cpp')
     prefix=r'''
 #include <cstdint>
 #include <cstddef>
@@ -46,7 +46,8 @@ void NetLog(const char*,...){}
 void ChangeCharacterExt(int index,BYTE*){Require(index==HeroIndex);++equipped;}
 void Hero_ApplyCatalogEquipment(CHARACTER*){}
 void ApplyPersistentSkillEffect97k(BYTE*,WORD,int){++buffed;}
-void Apply(BYTE* hero,const char* name){BYTE x=11,y=12,tx=13,ty=14,dir=3,dirpk=0x32;WORD viewSkillState=0;BYTE payload[62]{};const BYTE* e=payload;
+namespace GmSign{void SetLevel(const void*,int){}}
+void Apply(BYTE* hero,const char* name){BYTE x=11,y=12,tx=13,ty=14,dir=3,dirpk=0x32,gmLevel=0;WORD viewSkillState=0;BYTE payload[62]{};const BYTE* e=payload;
 '''+branch+r'''
 }
 int main(){

@@ -13,6 +13,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 int Call(int type,const BYTE* pool,int width,int height) { return FindEmptySlot(type,ARG,width,height); }
 bool Expected(const BYTE* pool,int gridW,int gridH,int w,int h) {
@@ -74,9 +80,9 @@ def harness(revision=None):
     prefix = PREAMBLE.split("BYTE* reservation;", 1)[0]
     header, definitions = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
     name = "DAT_07d78068"
-    prefix += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
-    prefix += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M).group()
-    body = function(read_source("src/Item/Item_InventoryGrid.cpp", revision), "FindEmptySlot")
+    prefix += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
+    prefix += optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M))
+    body = function(read_source("src/game/item/Item_InventoryGrid.cpp", revision), "FindEmptySlot")
     arg = "pool" if "const BYTE* param_2" in body else "static_cast<int>(reinterpret_cast<std::uintptr_t>(pool))"
     return prefix + body + MAIN.replace("ARG", arg)
 

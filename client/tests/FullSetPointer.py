@@ -9,6 +9,12 @@ from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 from LegacyEntityLayout import opaque_cloth_fields
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 int EquipmentLevelSet;
 '''
@@ -33,12 +39,12 @@ std::uint64_t Run(BYTE* entityMemory,BYTE* machine){
             if(profile==14)p.Level=static_cast<BYTE>(0xf0|(8+part%3));
             if(profile==15){p.Type=static_cast<short>(part==1?-1:ITEM_MODEL_BASE+part*32);p.Level=10;}
         }
-        CharacterAttribute=mode==0?nullptr:machine+16;DAT_07cf1ffc=mode==2?machine+32:CharacterAttribute;
+        CharacterAttribute=mode==0?nullptr:machine+16;CharacterMachine=mode==2?machine+32:CharacterAttribute;
         const unsigned short armor=armors[trial/16384];std::memcpy(machine+16+740,&armor,2);
         bool expected=true;int minimum=15;const unsigned first=(cls&7)==3?2:1;
         const int set=(character->BodyPart[5].Type-ITEM_MODEL_BASE)%16;
         for(unsigned part=first;part<=5;++part){const auto& p=character->BodyPart[part];if(p.Type==-1 || (p.Level&15)<9 || (p.Type-ITEM_MODEL_BASE)%16!=set)expected=false;minimum=(std::min)(minimum,static_cast<int>(p.Level&15));}
-        const int defense=((cls&7)==3 && expected && CharacterAttribute && CharacterAttribute==DAT_07cf1ffc && armor!=271 && armor!=276)?0:1;
+        const int defense=((cls&7)==3 && expected && CharacterAttribute && CharacterAttribute==CharacterMachine && armor!=271 && armor!=276)?0:1;
         BYTE beforeEntity[960],beforeMachine[1504];std::memcpy(beforeEntity,entityMemory,960);std::memcpy(beforeMachine,machine,1504);
         EquipmentLevelSet=123;g_bAddDefense=-3;const bool result=Check(entity);
         Require(result==expected && EquipmentLevelSet==(expected?minimum:0) && g_bAddDefense==defense);
@@ -59,20 +65,19 @@ int main(){
 
 
 def harness(revision=None):
-    source=read_source('src/Render/Render_PlayerEquipment.cpp',revision)
-    header=read_source('src/Entity/EntityTypes.h',revision)
+    source=read_source('src/render/Render_PlayerEquipment.cpp',revision)
+    header=read_source('src/game/entity/EntityTypes.h',revision)
     part=re.search(r'struct PART_t\s*\{.*?\};',header,re.S).group();part=opaque_cloth_fields(part)
     # Sólo prefijo sin punteros; OBJECT es una reserva opaca de los bytes x86.
     character=header[header.index('struct CHARACTER {'):header.index('    PART_t   Weapon[2];')]
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0]+'\n#include <algorithm>\n#include <initializer_list>\n#ifndef _WIN32\nusing WORD=std::uint16_t;\n#endif\nstruct OBJECT {BYTE opaque[444];};\n'
     prefix+=part+character+'BYTE remainder[292];};\nstatic_assert(sizeof(CHARACTER)==916);static_assert(offsetof(CHARACTER,Class)==444);static_assert(offsetof(CHARACTER,BodyPart)==480);\n'
     prefix+='\n'.join(re.findall(r'^inline (?:const )?CHARACTER\* AsCharacter[^\n]+',header,re.M))
-    prefix+=re.search(r'constexpr int ITEM_MODEL_BASE\s*=\s*[^;]+;',read_source('src/Item/ItemDefines.h',revision)).group()
+    prefix+=re.search(r'constexpr int ITEM_MODEL_BASE\s*=\s*[^;]+;',read_source('src/game/item/ItemDefines.h',revision)).group()
     globals_header,definitions=read_source('src/globals.h',revision),read_source('src/globals.cpp',revision)
-    for name in ['DAT_07cf1ff4','DAT_07cf1ffc']:
-        prefix+=re.search(rf'extern [^;\n]*\b{name}\s*;',globals_header).group()
-        prefix+=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M).group()
-    prefix+='\n'+re.search(r'^#define CharacterAttribute[^\n]+',globals_header,re.M).group()+'\n'
+    for name in ['CharacterAttribute','CharacterMachine']:
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}\s*;',globals_header))
+        prefix+=optional_definition(re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M))
     prefix+=re.search(r'^int g_bAddDefense\s*=\s*[^;]+;',source,re.M).group()+SERVICES
     code=function(source,'CheckFullSet_Tail')+function(source,'CheckFullSet')
     arg='reinterpret_cast<uintptr_t>(entity)' if 'CheckFullSet(uintptr_t' in code else 'static_cast<int>(reinterpret_cast<uintptr_t>(entity))'

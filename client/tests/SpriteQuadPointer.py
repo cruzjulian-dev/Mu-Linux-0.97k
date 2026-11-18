@@ -7,6 +7,12 @@ import re
 import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
+
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
 SERVICES=r'''
 using undefined4=std::uint32_t;
 float CameraMatrix[12];
@@ -58,9 +64,9 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);const
  std::printf("Sprite quad: 32768 casos, vertices/UV/color/orden %016llx\n",static_cast<unsigned long long>(expected));}
 '''
 def harness(revision=None):
- code=function(read_source('src/Render/Sprite.cpp',revision),'RenderSprite_0')
+ code=function(read_source('src/render/Sprite.cpp',revision),'RenderSprite_0')
  globals_source=read_source('src/globals.cpp',revision)
- constants='\n'.join(re.search(r'^float\s+'+n+r'\s*=\s*[^;]+;',globals_source,re.M).group()for n in ('_DAT_00552504','_DAT_00552580'))
+ constants='\n'.join(optional_definition(re.search(r'^float\s+'+n+r'\s*=\s*[^;]+;',globals_source,re.M))for n in ('_DAT_00552504','_DAT_00552580'))
  return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES+constants+code+MAIN
 def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--architecture',choices=('Win32','x64'),default='x64');parser.add_argument('--generator');parser.add_argument('--reference-ref');args=parser.parse_args()

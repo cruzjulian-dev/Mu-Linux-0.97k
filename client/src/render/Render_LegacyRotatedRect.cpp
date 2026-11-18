@@ -1,0 +1,61 @@
+// Render_LegacyRotatedRect.cpp
+
+#include "stdafx.h"
+#include "render/BufferedDraw.h"
+void __fastcall FUN_0045aaa0_impl(void *_this, char flags);
+void __cdecl    ClothNode_ScalarDtor(void *_this, char flags);
+#include "globals.h"
+#include "functions.h"
+
+// -- Declaraciones de funciones definidas en otros modulos -----------------
+// Cloth_Integrate vive en Physics/Cloth_Simulation.cpp y Cloth_Solve en
+// Net/Crypto.cpp.
+void __fastcall Cloth_Integrate(int*, float);
+int  __cdecl    Cloth_Solve(DWORD *a1);
+
+#include "net/Net.h"
+
+extern "C" BYTE OffsetInventoryItems[];
+extern void __cdecl operator_delete(void* ptr);
+extern void MapFileDecrypt(BYTE* buf, int size);
+
+// GL / 2D render
+// GL_DrawRotatedRect @ 0x005126E0 — GL_DrawRotatedRect
+// Draws a textured, rotated 2D quad using GL_TRIANGLE_FAN.
+// x,y = center angles (converted via sin/cos), w,h = half-extents,
+// color = z-depth as float bits.
+void __cdecl GL_DrawRotatedRect(int id, float x, float y, float w, float h, unsigned int color)
+{
+    float fSinX = (float)Screen_ToGLX(x);
+    float fCosX = (float)Screen_ToGLY(y);
+    float fSinW = (float)Screen_ToGLX(w);
+    float fCosW = (float)Screen_ToGLY(h);
+    GL_BindTextureSlot(id);
+    float sz = (float)gWindow.GetHeight();
+    float depth = *(float*)&color;
+
+    // Build rotation matrix from direction vector pointing at (depth)
+    float bvec[3] = { 0.0f, 0.0f, depth };
+    float mat[12];
+    Matrix_BuildFromEuler(bvec, mat);
+
+    // IDA sub_5126E0: esquinas (-w/2, h/2), (-w/2, -h/2), (w/2, -h/2),
+    // (w/2, h/2) con UV (0,0), (0,1), (1,1), (1,0), en ese orden (TRIANGLE_FAN).
+    static const float uvs[8] = { 0.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f,  1.0f, 0.0f };
+    const float hw = fSinW * 0.5f, hh = fCosW * 0.5f;
+    float corners[4][3] = {
+        { -hw,  hh, 0.0f },
+        { -hw, -hh, 0.0f },
+        {  hw, -hh, 0.0f },
+        {  hw,  hh, 0.0f }
+    };
+
+    BufferedDraw::Begin(BufferedDraw::Primitive::TriangleFan);
+    for (int i = 0; i < 4; i++) {
+        float out[3];
+        Vector_Rotate(corners[i], mat, out);
+        BufferedDraw::TexCoord2f(uvs[i*2], uvs[i*2+1]);
+        BufferedDraw::Vertex2f(fSinX + out[0], (sz - fCosX) + out[1]);
+    }
+    BufferedDraw::End();
+}

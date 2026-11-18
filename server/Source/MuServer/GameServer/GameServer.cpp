@@ -85,6 +85,10 @@ void CheckEditorReload()
 			gServerInfo.ReloadMonsterInfo();
 			LogAdd(LOG_BLUE, "[ServerInfo] Monster reloaded by editor flag");
 		}
+		else if (_stricmp(token, "spawns") == 0)
+		{
+			gServerInfo.ReloadSpawns();
+		}
 		else if (_stricmp(token, "move") == 0 || _stricmp(token, "gate") == 0)
 		{
 			gServerInfo.ReadMoveInfo();
@@ -144,6 +148,11 @@ void CheckEditorReload()
 		{
 			gServerInfo.ReadMapInfo();
 			LogAdd(LOG_BLUE, "[ServerInfo] Map reloaded by editor flag");
+		}
+		else if (_stricmp(token, "mapmanager") == 0)
+		{
+			gServerInfo.ReadMapManagerInfo();
+			LogAdd(LOG_BLUE, "[ServerInfo] MapManager reloaded by editor flag");
 		}
 		else if (_stricmp(token, "hack") == 0)
 		{
@@ -280,6 +289,12 @@ bool InitInstance(HINSTANCE hInstance)
 	}
 
 	ShowWindow(hWnd, SW_SHOW);
+
+	// La consola arranca oculta; los canales de protocolo, apagados (se
+	// prenden desde el menu). Common/Console arranca con todos prendidos.
+	gConsole.EnableOutput[CON_PROTO_TCP_RECV] = false;
+
+	gConsole.EnableOutput[CON_PROTO_TCP_SEND] = false;
 
 	ShowWindow(GetConsoleWindow(), (gConsole.HideConsole) ? SW_HIDE : SW_SHOW);
 

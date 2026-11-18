@@ -12,7 +12,7 @@ SERVICES=r'''
 #include <string>
 using uint=unsigned;using byte=BYTE;
 BYTE *inputMemory,*namesMemory,*wordsMemory;char *input,*names,*words;
-#define DAT_07db8710 (*reinterpret_cast<char(*)[10][256]>(input))
+#define InputText (*reinterpret_cast<char(*)[10][256]>(input))
 #define DAT_07d27610 (*reinterpret_cast<char(*)[20000]>(names))
 #define DAT_07d73104 (*reinterpret_cast<char(*)[20000]>(words))
 char GlobalText[459][300];
@@ -23,14 +23,16 @@ int DAT_07d78074,DAT_07d78070;std::string expectedRaw,expectedStripped;std::vect
 int mbclen(byte* p){Require(*p>0 && *p<128);return 1;}
 FIND
 char* Block(unsigned n){
- char* values[]={(char*)&DAT_00561740,(char*)&DAT_00561744,(char*)&DAT_00561748,(char*)&DAT_0056174c,(char*)&DAT_00561750,s_Webzen_00561754,s_WebZen_0056175c,s_Webzen_00561764,s_WEBZEN_0056176c,&DAT_07d4b4b0,&DAT_07d4b5dc};
+ char* values[]={(char*)&DAT_00561740,(char*)&DAT_00561744,(char*)&DAT_00561748,(char*)&DAT_0056174c,(char*)&DAT_00561750,(char*)"Webzen",(char*)"WebZen",(char*)"webzen",(char*)"WEBZEN",&DAT_07d4b4b0,&DAT_07d4b5dc};
  Require(n<11);return values[n];
 }
 bool FindTextA(char* text,char* pattern,bool sensitive){
  const auto address=reinterpret_cast<std::uintptr_t>(pattern),a=reinterpret_cast<std::uintptr_t>(names),b=reinterpret_cast<std::uintptr_t>(words);unsigned id=0;
  if(address>=a && address<a+20000){Require((address-a)%20==0);id=1000+unsigned((address-a)/20);}
  else if(address>=b && address<b+20000){Require((address-b)%20==0);id=2000+unsigned((address-b)/20);}
- else{for(unsigned i=0;i<11;++i)if(pattern==Block(i)){id=4000+i;break;}}
+ else{for(unsigned i=0;i<11;++i)if(pattern==Block(i)){id=4000+i;break;}
+  // Desde la T8l los cuatro patrones de Webzen son literales: se reconocen por contenido.
+  if(!id)for(unsigned i=5;i<9;++i)if(std::strcmp(pattern,Block(i))==0){id=4000+i;break;}}
  Require(id && !sensitive && std::strcmp(text,(id<4000?expectedStripped:expectedRaw).c_str())==0);
  calls.push_back(id);return ActualFind(text,pattern,sensitive);
 }
@@ -79,13 +81,13 @@ int main(){
 def harness(revision=None):
     globals_source=read_source('src/globals.cpp',revision)
     header=read_source('src/globals.h',revision)
-    names=('DAT_00561740','DAT_00561744','DAT_00561748','DAT_0056174c','DAT_00561750','s_Webzen_00561754','s_WebZen_0056175c','s_Webzen_00561764','s_WEBZEN_0056176c')
+    names=('DAT_00561740','DAT_00561744','DAT_00561748','DAT_0056174c','DAT_00561750',)
     constants='\n'.join(re.search(r'^(?:DWORD|char)\s+'+name+r'\s*(?:\[\])?\s*=\s*[^;]+;',globals_source,re.M).group(0) for name in names)
     aliases='\n'.join(re.search(r'^#define '+name+r'\s+[^\n]+',header,re.M).group(0) for name in ('DAT_07d4b4b0','DAT_07d4b5dc'))
     concat=re.search(r'^#define CONCAT31[^\n]+',read_source('src/types.h',revision),re.M).group(0)
-    find=function(read_source('src/UI/UI_LegacyExterns.cpp',revision),'FindTextA').replace('FindTextA','ActualFind')
+    find=function(read_source('src/ui/UI_LegacyExterns.cpp',revision),'FindTextA').replace('FindTextA','ActualFind')
     services=SERVICES.replace('ALIASES',aliases).replace('CONSTANTS',constants).replace('CONCAT',concat).replace('FIND',find)
-    return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x40000')+services+function(read_source('src/UI/Chat.cpp',revision),'Chat_ValidateInputCommand')+MAIN
+    return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x40000')+services+function(read_source('src/ui/Chat.cpp',revision),'Chat_ValidateInputCommand')+MAIN
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)

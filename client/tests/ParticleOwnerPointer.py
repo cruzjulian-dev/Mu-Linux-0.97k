@@ -12,9 +12,19 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 static_assert(sizeof(int)==4);
 char* DAT_07abf5f0;
+PARTICLE_TYPES
+#ifdef PARTICLE_DEFINED
+PARTICLE* Particles;
+#endif
 // Dueño completo por slot (el pool sólo guarda 32 bits en +0x3C).
 std::uintptr_t g_ParticleOwner[3000];
 MACROS
@@ -28,6 +38,9 @@ template<class T>void Put(BYTE* p,unsigned at,T value){std::memcpy(p+at,&value,s
 constexpr unsigned poolBytes=32*112+32;
 std::uint64_t Run(BYTE* pool,BYTE* owner,BYTE* alias){
  DAT_07abf5f0=reinterpret_cast<char*>(pool+16);
+#ifdef PARTICLE_DEFINED
+ Particles=reinterpret_cast<PARTICLE*>(pool+16);
+#endif
  const int lives[]={static_cast<int>(0x80000000u),-2,-1,0,1,4,5,6,7,0x7fffffff};const BYTE flags[]={0,1,2,127,128,255};const unsigned slots[]={0,1,3,31};
  std::uint64_t hash=14695981039346656037ull;unsigned cases=0,coverage=0;
  for(unsigned profile=0;profile<64;++profile)for(int life:lives)for(unsigned slot:slots)for(BYTE active:flags){
@@ -67,14 +80,22 @@ int main(){
 }
 '''
 
+def particle_types(revision=None):
+    """El struct PARTICLE de esa revisión (vacío si todavía no existía)."""
+    try:
+        text=read_source('src/render/ParticleTypes.h',revision)
+    except Exception:
+        return ''
+    return '\n'.join(l for l in text.splitlines() if not l.startswith(('#pragma','#include')))
+
 def harness(revision=None):
-    source=read_source('src/Render/Particle_Move.cpp',revision)
+    source=read_source('src/render/Particle_Move.cpp',revision)
     begin=source.index('case 2:',source.index('if (iVar5 == 0x498)'));end=source.index('case 3:',begin)
-    macros='\n'.join(re.findall(r'^#define P_[A-Z0-9]+(?:\([^)]*\))?\s+[^\n]+',source,re.M))
+    macros='\n'.join(re.findall(r'^#define P_[A-Z0-9]*(?:\([^)]*\))?\s+[^\n]+',source,re.M))
     if '#define P_ENT(o)' not in macros:raise ValueError('Macros de partículas incompletas')
     globals_source=read_source('src/globals.cpp',revision)
-    constants='\n'.join(re.search(r'^float\s+'+name+r'\s*=\s*[^;]+;',globals_source,re.M).group(0) for name in ('_DAT_00552b28','_DAT_00552874'))
-    return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES.replace('MACROS',macros).replace('CONSTANTS',constants).replace('CASE',source[begin:end])+MAIN
+    constants='\n'.join(optional_definition(re.search(r'^float\s+'+name+r'\s*=\s*[^;]+;',globals_source,re.M)) for name in ('_DAT_00552b28','_DAT_00552874'))
+    return PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES.replace('PARTICLE_TYPES',particle_types(revision)+('\n#define PARTICLE_DEFINED' if particle_types(revision) else '')).replace('MACROS',macros).replace('CONSTANTS',constants).replace('CASE',source[begin:end])+MAIN
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)

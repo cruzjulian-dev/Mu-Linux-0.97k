@@ -12,6 +12,8 @@ MAIN=r'''
 #include <initializer_list>
 char* serverData;
 #define DAT_083a45d8 (*reinterpret_cast<char(*)[0x3600]>(serverData))
+STRUCTS
+#define ServerList (*reinterpret_cast<SERVER_LIST_t(*)[MAX_SERVER_HI]>(serverData))
 ALIAS
 std::uint64_t Classify(){
     int iVar8,iVar10;char *pcVar7,*pcVar13,cVar1;unsigned uVar6;
@@ -42,11 +44,23 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);const
 '''
 
 
+def server_structs(revision=None):
+    structs=read_source('src/structs.h',revision)
+    out='using WORD=std::uint16_t;\n'
+    for name in ('MAX_SERVER_HI','MAX_SERVER_LO'):
+        out+=re.search(rf'^#define {name}[^\n]+',structs,re.M).group()+'\n'
+    for name in ('SERVER_t','SERVER_LIST_t'):
+        out+=re.search(rf'^struct {name}\s*\{{.*?^\}};',structs,re.M|re.S).group()+'\n'
+    return out
+
+
 def harness(revision=None):
-    source=read_source('src/Scene/Scene_Login_ServerSelect.cpp',revision)
+    source=read_source('src/scenes/Scene_Login_ServerSelect.cpp',revision)
     start=source.index('    // ── PASS 2:');end=source.index('    // ── PASS 3:',start)
-    alias=re.search(r'^#define DAT_083a45ec[^\n]+',read_source('src/globals.h',revision),re.M).group()
-    return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x20000')+MAIN.replace('ALIAS',alias).replace('PASS',source[start:end])
+    # DAT_083a45ec era el alias de ServerList[0].Number hasta la T8j.
+    alias=re.search(r'^#define DAT_083a45ec[^\n]+',read_source('src/globals.h',revision),re.M)
+    alias=alias.group() if alias else ''
+    return PREAMBLE.split('char DAT_00559bb4',1)[0].replace('0x10000','0x20000')+MAIN.replace('ALIAS',alias).replace('STRUCTS',server_structs(revision)).replace('PASS',source[start:end])
 
 
 def main():

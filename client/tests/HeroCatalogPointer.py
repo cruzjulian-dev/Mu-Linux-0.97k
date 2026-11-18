@@ -18,7 +18,7 @@ std::uint64_t RunHero(CHARACTER* character, BYTE* machine, bool noCustom) {
     activeCharacter = character; activeMachine = machine; stableHelper = noCustom; seed = 0x97c09720; std::uint64_t digest = 14695981039346656037ull;
     const short types[] = {-1, 0, 31, 128, 135, 416, 417, 418, 419, 512, 600, 601, 602, 603, 700};
     const short plainPets[] = {-1, 416, 417, 418, 419, 700};
-    DAT_07cf1ffc = nullptr; classEvents.clear(); CallHero(nullptr); Require(classEvents.empty());
+    CharacterMachine = nullptr; classEvents.clear(); CallHero(nullptr); Require(classEvents.empty());
     for(int trial = 0; trial < 16384; ++trial) {
         std::memset(character, 0x5a, sizeof(*character)); std::memset(machine, 0xa5, 1412);
         character->Object.Type = trial % 3 ? 390 : 391;
@@ -26,11 +26,11 @@ std::uint64_t RunHero(CHARACTER* character, BYTE* machine, bool noCustom) {
             const short type = types[Input() % 15]; std::memcpy(machine + 536 + 68*slot, &type, 2);
         }
         if(noCustom) { const short pet = plainPets[Input() % 6]; std::memcpy(machine + 1080, &pet, 2); }
-        DAT_07cf1ffc = trial % 5 == 0 ? nullptr : machine;
+        CharacterMachine = trial % 5 == 0 ? nullptr : machine;
         CHARACTER expected; std::memcpy(&expected, character, sizeof(expected));
         BYTE beforeMachine[1412]; std::memcpy(beforeMachine, machine, 1412);
         std::vector<int> expectedEvents; int expectedParts[9]; for(int& value : expectedParts) value = -9999;
-        if(DAT_07cf1ffc && expected.Object.Type == 390) {
+        if(CharacterMachine && expected.Object.Type == 390) {
             const int wear[] = {136,204,272,340,408,0,68,476,544};
             for(int part = 0; part < 9; ++part) {
                 short type; std::memcpy(&type, machine + 536 + wear[part], 2); expectedParts[part] = type; expectedEvents.push_back(100 + part);
@@ -70,7 +70,7 @@ int main() {
 
 def harness(revision=None):
     prefix = class_harness(revision).split("void CallClass(CHARACTER* character)", 1)[0]
-    hero = function(read_source("src/Entity/Character_Motion.cpp", revision), "Hero_ApplyCatalogEquipment")
+    hero = function(read_source("src/game/entity/Character_Motion.cpp", revision), "Hero_ApplyCatalogEquipment")
     arg = "character" if "CHARACTER* character" in hero else "static_cast<int>(reinterpret_cast<std::uintptr_t>(character))"
     return prefix + hero + MAIN.replace("CALL_HERO", f"Hero_ApplyCatalogEquipment({arg})")
 

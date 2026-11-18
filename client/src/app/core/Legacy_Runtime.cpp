@@ -1,0 +1,62 @@
+// Legacy_Runtime.cpp
+
+#include "stdafx.h"
+#include "globals.h"
+#include "functions.h"
+#include "net/MuEmu.h"
+#include "net/Net.h"
+#include "render/Camera.h"
+
+// ── Missing globals (extern-declared in various .cpp but never defined) ──────
+BYTE* g_EntityBase    = nullptr;  // DAT_07abf5d0
+
+// Sound.cpp — real DirectSound8 globals live in globals.cpp:
+//   g_EnableSound, g_Enable3DSound, g_lpDS, g_lpDS3DListener, wavefile,
+//   g_dwBufferBytes, g_lpDSBuffer[420][4], g_lpDS3DBuffer[420][4],
+//   MaxBufferChannel[], BufferChannel[], Enable3DSound[], BufferName[][].
+
+// Texture.cpp
+int g_bound_texture_id = 0;   // DAT_00561574
+int g_screen_height    = 480; // DAT_00561570
+int g_vram_used        = 0;   // m_dwUsedTextureMemory
+
+// Party.cpp
+BYTE* g_PartyHPTable   = nullptr; // DAT_07e11e98
+
+// ── CRT wrappers (these are real implementations) ────────────────────────────
+
+// IDA: crt_sprintf (0x005416BC)
+int __cdecl crt_sprintf(char* buf, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int r = vsprintf(buf, fmt, args);
+    va_end(args);
+    return r;
+}
+
+// IDA: operator_delete (0x0054158C)
+void __cdecl operator_delete(void* ptr) {
+    free(ptr);
+}
+
+
+// ── FUN_ stubs (void returning) ───────────────────────────────────────────────
+// CWsctlc__LogPrintOn @ 0x00403A30 — NOP (empty function in original binary).
+void __cdecl CWsctlc__LogPrintOn(void) {}
+
+// ── CRT wrappers (forwarded to real CRT) ─────────────────────────────────────
+// crt_fseek — CRT fseek wrapper
+void __cdecl crt_fseek(int *fp, int offset, int whence) {
+    fseek((FILE*)fp, offset, whence);
+}
+
+// crt_ftell — CRT ftell wrapper
+int __cdecl crt_ftell(char *fp) {
+    return (int)ftell((FILE*)fp);
+}
+
+// crt_fread — CRT fread wrapper
+int __cdecl crt_fread(void *dst, int size, int count, int *fp) {
+    return (int)fread(dst, (size_t)size, (size_t)count, (FILE*)fp);
+}
+

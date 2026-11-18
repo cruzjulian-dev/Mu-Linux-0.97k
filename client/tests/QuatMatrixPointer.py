@@ -12,6 +12,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 #include <cmath>
 std::uint32_t seed;
@@ -64,8 +70,8 @@ int main() {
 
 def harness(revision=None):
     prefix = PREAMBLE.split("BYTE* reservation;", 1)[0]
-    prefix += re.search(r"^float\s+_DAT_00552cf0\s*=[^;]+;", read_source("src/globals.cpp", revision), re.M).group()
-    matrix = function(read_source("src/Render/Render_LegacyTransforms.cpp", revision), "QuatToMatrix")
+    prefix += optional_definition(re.search(r"^float\s+_DAT_00552cf0\s*=[^;]+;", read_source("src/globals.cpp", revision), re.M))
+    matrix = function(read_source("src/render/Render_LegacyTransforms.cpp", revision), "QuatToMatrix")
     args = "q, m" if "const float* q" in matrix else "static_cast<int>(reinterpret_cast<std::uintptr_t>(q)), static_cast<int>(reinterpret_cast<std::uintptr_t>(m))"
     return prefix + matrix + MAIN.replace("CALL_MATRIX", f"QuatToMatrix({args}, 123, -456)")
 

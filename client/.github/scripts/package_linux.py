@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--version", help="por defecto, el tag de la Release o ClientVersion de src/Config/ServerConfig.h")
+    parser.add_argument("--version", help="por defecto, el tag de la Release o ClientVersion de src/app/config/ServerConfig.h")
     parser.add_argument("--arch", choices=("x64", "x86"), default="x86")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
@@ -27,10 +27,10 @@ def main():
     if args.version is None:
         # Fuera de un tag, la versión que el cliente le manda al server: así el
         # nombre del paquete no queda atrasado respecto del protocolo.
-        config = (repo / "src/Config/ServerConfig.h").read_text(encoding="utf-8")
+        config = (repo / "src/app/config/ServerConfig.h").read_text(encoding="utf-8")
         found = re.search(r'ClientVersion\[\]\s*=\s*"([^"]+)"', config)
         if not found:
-            parser.error("No se encontró ClientVersion en src/Config/ServerConfig.h")
+            parser.error("No se encontró ClientVersion en src/app/config/ServerConfig.h")
         args.version = found[1]
     if not re.fullmatch(r"[A-Za-z0-9._-]+", args.version):
         parser.error("Versión inválida")
@@ -66,7 +66,7 @@ def main():
         shutil.copy2(repo / ".github/scripts/launch-linux.sh", package / "launch.sh")
         (package / "main").chmod(0o755)
         (package / "launch.sh").chmod(0o755)
-        assets = subprocess.check_output(["git", "-C", str(repo), "ls-files", "-z", "bin/Client/Data"])
+        assets = subprocess.check_output(["git", "-C", str(repo), "ls-files", "-z", "bin/Client/System", "bin/Client/Content"])
         for raw in assets.split(b"\0"):
             if not raw:
                 continue
@@ -84,8 +84,8 @@ def main():
             (source("mu_freetype") / "docs/GPLv2.TXT", "FreeType-GPLv2.txt"),
             (repo / "lib/stb/stb_image.h", "stb_image.h"),
             (repo / "lib/stb/stb_image_write.h", "stb_image_write.h"),
-            (repo / "src/Platform/GL/LICENSE.glad", "glad.txt"),
-            (repo / "src/Platform/GL/glad.h", "glad.h"),
+            (repo / "src/platform/GL/LICENSE.glad", "glad.txt"),
+            (repo / "src/platform/GL/glad.h", "glad.h"),
         ]:
             shutil.copy2(origin, licenses / destination)
         # Dawn (WebGPU) entra por vcpkg sólo en x64.

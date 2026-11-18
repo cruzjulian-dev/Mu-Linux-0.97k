@@ -56,13 +56,13 @@ int main(){auto* low=static_cast<BYTE*>(Reserve(0x26000000u));Require(low);const
 
 
 def harness(revision=None):
-    header=read_source('src/UI/ChatTypes.h',revision)
+    header=read_source('src/ui/ChatTypes.h',revision)
     record=re.search(r'struct CHAT\s*\{.*?\};',header,re.S).group()
     # Vista x86 de prueba: Owner no se lee en esta función y permanece opaco.
     record=re.sub(r'CHARACTER\*\s+Owner;', 'BYTE opaqueOwner[4];',record)
     prefix='#define NOMINMAX\n'+PREAMBLE.split('char DAT_00559bb4',1)[0]+'\n#include <algorithm>\nusing vec3_t=float[3];\n#pragma pack(push,1)\n'+record+'\n#pragma pack(pop)\nstatic_assert(sizeof(CHAT)==596);static_assert(offsetof(CHAT,Width)==576);static_assert(offsetof(CHAT,Height)==580);\n'
     prefix+='\n'.join(re.findall(r'^inline (?:const )?CHAT\* AsChat[^\n]+',header,re.M))+SERVICES
-    code=function(read_source('src/Render/HUD_Pass1.cpp',revision),'FloatingLabel_MeasureText')
+    code=function(read_source('src/render/HUD_Pass1.cpp',revision),'FloatingLabel_MeasureText')
     arg='chat' if 'CHAT* c' in code.split('{',1)[0] else 'static_cast<int>(reinterpret_cast<uintptr_t>(chat))'
     return prefix+code+MAIN.replace('ARG',arg)
 

@@ -14,6 +14,12 @@ from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 from LegacyEntityLayout import opaque_cloth_fields
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 using float10=long double;
 using undefined4=std::uint32_t;
@@ -64,10 +70,10 @@ std::uint64_t Run(BYTE* memory) {
         Require(object->CurrentAction==0 && object->PriorAction==0);
         if(object->Type<0) Require(object->Scale==0.8f && object->BlendMesh==-1 && object->HiddenMesh==-1 && result==0);
         const int first=mode==0 || mode==2 ? 12345 : 0, second=mode==0 || mode==2 ? 23456 : 0;
-        if(object->Type==414) Require(object->BlendMeshTexCoordU==static_cast<float>(first%10)*_DAT_005524f4 && result==first/10);
+        if(object->Type==414) Require(object->BlendMeshTexCoordU==static_cast<float>(first%10)*0.1f && result==first/10);
         if(object->Type==565 || object->Type==606) {
-            Require(object->BlendMeshTexCoordU==static_cast<float>(first%10)*_DAT_005524f4);
-            Require(object->BlendMeshTexCoordV==static_cast<float>(second%10)*_DAT_005524f4 && result==second/10);
+            Require(object->BlendMeshTexCoordU==static_cast<float>(first%10)*0.1f);
+            Require(object->BlendMeshTexCoordV==static_cast<float>(second%10)*0.1f && result==second/10);
         }
         for(int i=0;i<16;++i) Require(memory[i]==0x5a && memory[16+sizeof(OBJECT)+i]==0x5a);
         for(std::size_t i=0;i<sizeof(OBJECT);++i) { digest^=reinterpret_cast<BYTE*>(object)[i]; digest*=1099511628211ull; }
@@ -91,7 +97,7 @@ int main() {
 
 def harness(revision=None):
     prefix = PREAMBLE.split("BYTE* reservation;", 1)[0] + "\n#include <cmath>\n"
-    types = read_source("src/Entity/EntityTypes.h", revision)
+    types = read_source("src/game/entity/EntityTypes.h", revision)
     obj = re.search(r"struct OBJECT\s*\{.*?\};", types, re.S).group()
     obj = re.sub(r"OBJECT\*\s+Owner", "std::uint32_t Owner", obj)
     obj = re.sub(r"vec34_t\*\s+BoneMatrices", "std::uint32_t BoneMatrices", obj)
@@ -99,13 +105,13 @@ def harness(revision=None):
     obj = re.sub(r"OBJECT\*\s+(ScenePrevious|SceneNext)\b", r"std::uint32_t \1", obj)
     obj = opaque_cloth_fields(obj)
     prefix += "\nusing vec3_t=float[3];\n#pragma pack(push,1)\n" + obj + "\n#pragma pack(pop)\nstatic_assert(sizeof(OBJECT)==444);\n"
-    prefix += re.search(r"struct MaterialVisualSample\s*\{.*?\n\};", read_source("src/Render/MaterialVisuals.h", revision), re.S).group()
+    prefix += re.search(r"struct MaterialVisualSample\s*\{.*?\n\};", read_source("src/render/MaterialVisuals.h", revision), re.S).group()
     prefix += SERVICES
-    source = read_source("src/Entity/Entity_Reset.cpp", revision)
+    source = read_source("src/game/entity/Entity_Reset.cpp", revision)
     header, definitions = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
     for name in sorted(set(re.findall(r"_DAT_\w+|\bWorldTime\b", source))):
-        prefix += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
-        prefix += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M).group()
+        prefix += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
+        prefix += optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", definitions, re.M))
     for name in ("ItemObjectAttributeImpl", "ItemObjectAttribute", "ItemObjectAttributeForRender"):
         prefix += function(source, name)
     arg = "object" if "ItemObjectAttribute(OBJECT*" in source else "static_cast<int>(reinterpret_cast<std::uintptr_t>(object))"

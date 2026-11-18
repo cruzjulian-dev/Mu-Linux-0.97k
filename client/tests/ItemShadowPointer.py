@@ -14,6 +14,12 @@ import tempfile
 from GatePointer import PREAMBLE as IO_PREAMBLE
 from SceneObjectPointer import ROOT, build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 EXTRA = r'''
 using UINT = unsigned int;
 DWORD DAT_01c5e200 = 0x01c5e200;
@@ -84,7 +90,7 @@ def harness(revision=None):
     globals_source = read_source("src/globals.cpp", revision)
     declarations = ""
     for name in ("DAT_055c9e44", "DAT_07d78068", "DAT_07cf1ff0"):
-        declarations += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
+        declarations += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
         declarations += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", globals_source, re.M).group()
     accessors = ""
     for name in ("ItemAttribute_Base", "ItemAttribute_IsRow"):
@@ -111,14 +117,14 @@ void ValidatePrimary() {
     SetPrimary(allocation, base);
 }
 """
-    constants = read_source("src/Item/ItemDefines.h", revision)
+    constants = read_source("src/game/item/ItemDefines.h", revision)
     item_max = "\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;", constants, re.M))
     allocation = re.search(r"^[ \t]*DAT_07cf1ff0\s*=\s*[^;]+;",
-                           read_source("src/Platform/ClientEntry.cpp", revision), re.M).group()
+                           read_source("src/platform/ClientEntry.cpp", revision), re.M).group()
     allocation = allocation.replace("malloc(0x8000)", "AllocateShadow(0x8000)")
-    data = read_source("src/Item/Item_Data.cpp", revision)
-    scene = read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision)
-    sample = ROOT / "bin/Client/Data/Local/item.bmd"
+    data = read_source("src/assets/data/Item_Data.cpp", revision)
+    scene = read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision)
+    sample = __import__("data_paths").asset(ROOT, "Local/item.bmd")
     if not sample.is_file():
         raise FileNotFoundError(sample)
     return (IO_PREAMBLE.split("BYTE* reservation;")[0] + "\n#ifndef _MSC_VER\n#define __forceinline inline\n#endif\n" + item_max + EXTRA + declarations + accessors + setup + TEXT

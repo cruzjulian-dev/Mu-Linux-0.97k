@@ -1,18 +1,18 @@
 // Verificación del backend BMD real en un contexto oculto, sin assets ni red.
 #define NOMINMAX
-#include "Platform/GL/glad.h"
+#include "platform/GL/glad.h"
 // Cargar GL antes de los aliases ABI Win32 de la prueba POSIX.
-#include "Platform/PlatformHeaders.h"
-#include "Platform/GLFunctions.h"
-#include "Platform/ITimer.h"
-#include "Render/BMDDevice.h"
-#include "Render/BufferedDraw.h"
-#include "Render/Gfx.h"
-#include "Render/MeshDraw.h"
-#include "Render/RenderProfile.h"
-#include "Render/RenderState.h"
-#include "Render/ResourceTables.h"
-#include "Render/Skinning.h"
+#include "platform/PlatformHeaders.h"
+#include "platform/GLFunctions.h"
+#include "platform/ITimer.h"
+#include "render/BMDDevice.h"
+#include "render/BufferedDraw.h"
+#include "render/Gfx.h"
+#include "render/MeshDraw.h"
+#include "render/RenderProfile.h"
+#include "render/RenderState.h"
+#include "render/ResourceTables.h"
+#include "render/Skinning.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <cassert>
@@ -24,9 +24,9 @@
 #include <string>
 #include <vector>
 
-int DAT_083a412c=0;
-char DAT_083a411c=0,DAT_083a411d=0,DAT_083a4125=0,DAT_083a411e=0,DAT_083a42ea=0;
-DWORD DAT_083a42e8=0,DAT_00561574=0xffffffffu;
+int AlphaBlendType=0;
+char CullFaceEnable=0,AlphaTestEnable=0,TextureEnable=0,DepthTestEnable=0,FogEnable=0;
+DWORD DepthMaskEnable=0,CachTexture=0xffffffffu;
 char* g_BitmapsRaw=ResourceTables::TextureBase();
 static std::vector<std::string> diagnostics;
 extern "C" void DbgLogPublic(const char* text){
@@ -77,9 +77,9 @@ void MatrixCases(){
         BMDDevice::EndModel();assert(initial==CurrentMatrix());
     }
     for(int physical=0;physical<2;++physical)for(int cache=0;cache<2;++cache){
-        Gfx::SetEnabled(Gfx::Cap::CullFace,physical!=0);DAT_083a411c=char(cache);
-        {BMDDevice::MeshScope scope(true);BMDDevice::Select({BMDDevice::Pass::Color});assert(!Gfx::IsEnabled(Gfx::Cap::CullFace)&&DAT_083a411c==0);{BMDDevice::MeshScope nestedScope(true);BMDDevice::Select({BMDDevice::Pass::Glow});assert(!Gfx::IsEnabled(Gfx::Cap::CullFace));}}
-        assert(Gfx::IsEnabled(Gfx::Cap::CullFace)==(physical!=0)&&DAT_083a411c==physical);
+        Gfx::SetEnabled(Gfx::Cap::CullFace,physical!=0);CullFaceEnable=char(cache);
+        {BMDDevice::MeshScope scope(true);BMDDevice::Select({BMDDevice::Pass::Color});assert(!Gfx::IsEnabled(Gfx::Cap::CullFace)&&CullFaceEnable==0);{BMDDevice::MeshScope nestedScope(true);BMDDevice::Select({BMDDevice::Pass::Glow});assert(!Gfx::IsEnabled(Gfx::Cap::CullFace));}}
+        assert(Gfx::IsEnabled(Gfx::Cap::CullFace)==(physical!=0)&&CullFaceEnable==physical);
         assert((glIsEnabled(GL_CULL_FACE)!=0)==(physical!=0));
     }
     assert(glGetError()==GL_NO_ERROR);std::puts("BMD: pila de matrices en CPU y culling anidado correctos");
@@ -100,7 +100,7 @@ void SetupView(int view,bool alpha,unsigned texture){
     if(view%2){Gfx::Translate(.07f,.12f,0);const float scale[16]{.8f,0,0,0, 0,.7f,0,0, 0,0,1,0, 0,0,0,1};RenderState::MultiplyMatrix(scale);}
     Gfx::MatrixMode(Gfx::Matrix::ModelView);
     Gfx::ClearColor(.1f,.2f,.3f,.4f);Gfx::Clear(Gfx::ClearColorBuffer|Gfx::ClearDepthBuffer);
-    DAT_083a412c=alpha?2:0;DAT_083a411c=alpha?0:1;DAT_083a411d=alpha?1:0;DAT_083a4125=1;DAT_083a411e=1;DAT_083a42e8=1;DAT_083a42ea=0;
+    AlphaBlendType=alpha?2:0;CullFaceEnable=alpha?0:1;AlphaTestEnable=alpha?1:0;TextureEnable=1;DepthTestEnable=1;DepthMaskEnable=1;FogEnable=0;
 }
 void CheckCoreProgram(){
     int program=0;glGetIntegerv(GL_CURRENT_PROGRAM,&program);assert(program);unsigned shaders[2]{};int count=0;glGetAttachedShaders(unsigned(program),2,&count,shaders);assert(count==2);
@@ -111,7 +111,7 @@ Image DrawCase(int view,bool alpha,int path){
     const unsigned char pixels[16]{200,150,100,20,100,200,150,80,150,100,200,180,220,180,120,250};
     glTexImage2D(GL_TEXTURE_2D,0,alpha?GL_RGBA8:GL_RGB8,2,2,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
     Gfx::TexParameter(Gfx::TexParam::MinFilter,Gfx::TexValue::Linear);Gfx::TexParameter(Gfx::TexParam::MagFilter,Gfx::TexValue::Linear);
-    SetupView(view,alpha,texture);ResourceTables::EnsureTextures(36);std::memcpy(g_BitmapsRaw+35*0x38+0x2c,&texture,4);g_BitmapsRaw[35*0x38+0x28]=alpha?4:3;DAT_00561574=0xffffffffu;
+    SetupView(view,alpha,texture);ResourceTables::EnsureTextures(36);std::memcpy(g_BitmapsRaw+35*0x38+0x2c,&texture,4);g_BitmapsRaw[35*0x38+0x28]=alpha?4:3;CachTexture=0xffffffffu;
     unsigned char face[36]{},raw[48]{},normal[60]{};face[0]=3;float local[9]{-.7f,-.7f,.1f,.7f,-.7f,-.1f,0,.7f,.2f};float world[9];std::memcpy(world,local,sizeof(world));float colors[9]{.8f,.6f,.4f,.4f,.8f,.6f,.6f,.4f,.8f},uv[6]{0,0,1,0,.5f,1},body[3]{1,1,1},lighting[3]{1,1,1};
     for(int i=0;i<3;++i){short index=short(i);for(int offset:{2,10,18})std::memcpy(face+offset+i*2,&index,2);std::memcpy(raw+i*16+4,local+i*3,12);float n[3]{0,0,1};std::memcpy(normal+i*20+4,n,12);}
     int model=0;float bones[12]{1,0,0,0,0,1,0,0,0,0,1,0},direction[3]{0,0,1},coefficients[3]{.5f,.5f,.25f},origin[3]{};
@@ -133,7 +133,7 @@ Image DrawCase(int view,bool alpha,int path){
         glReadPixels(0,0,128,128,GL_RGBA,GL_UNSIGNED_BYTE,image.color.data());glReadPixels(0,0,128,128,GL_DEPTH_COMPONENT,GL_FLOAT,image.depth.data());
         Platform::timer.offset+=2101;
     }
-    BufferedDraw::Suspend();Gfx::DeleteTexture(texture);DAT_00561574=0xffffffffu;assert(glGetError()==GL_NO_ERROR);return image;
+    BufferedDraw::Suspend();Gfx::DeleteTexture(texture);CachTexture=0xffffffffu;assert(glGetError()==GL_NO_ERROR);return image;
 }
 void Images(){
     if(!Materials::Enabled())Materials::Toggle();

@@ -8,6 +8,12 @@ import tempfile
 from GatePointer import PREAMBLE
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES=r'''
 #include <cmath>
 using uint=unsigned;
@@ -40,12 +46,12 @@ std::uint64_t Run(BYTE* entityMemory,BYTE* modelMemory,BYTE* owner){
         terrainCalls=0;Entity_GetLightScale(ENTITY_ARG,MODEL_ARG);
         float color[3];
         if(type==325){for(float& c:color)c=0.6f;Require(terrainCalls==0);}
-        else if(type==225 && flags&0x200){const float c=static_cast<float>((fsin(static_cast<float10>(WorldTime)*static_cast<float10>(_DAT_00552a08))+static_cast<float10>(_DAT_0055256c))*static_cast<float10>(_DAT_00552504));for(float& component:color)component=c;Require(terrainCalls==0);}
+        else if(type==225 && flags&0x200){const float c=static_cast<float>((fsin(static_cast<float10>(WorldTime)*static_cast<float10>(0.003f))+static_cast<float10>(1.0f))*static_cast<float10>(0.5f));for(float& component:color)component=c;Require(terrainCalls==0);}
         else{
             Require(terrainCalls==1);beforeModel[16+68]=contrast;
             const bool zero=terrain[0]==0 && terrain[1]==0 && terrain[2]==0;
             const bool fallback=zero && ((SceneFlag!=2 && SceneFlag!=4) || type==162);
-            for(int axis=0;axis<3;++axis){const float component=fallback?1.0f:terrain[axis];color[axis]=(contrast?component:component*_DAT_005524f4)+light[axis];}
+            for(int axis=0;axis<3;++axis){const float component=fallback?1.0f:terrain[axis];color[axis]=(contrast?component:component*0.1f)+light[axis];}
         }
         std::memcpy(beforeModel+16+72,color,12);
         Require(std::memcmp(beforeModel,modelMemory,224)==0 && std::memcmp(beforeEntity,entityMemory,480)==0 && std::memcmp(beforeOwner,owner,160)==0);
@@ -65,18 +71,18 @@ int main(){
 
 
 def harness(revision=None,native=False):
-    code=function(read_source('src/Terrain/Terrain_Light.cpp',revision),'Entity_GetLightScale')
+    code=function(read_source('src/game/terrain/Terrain_Light.cpp',revision),'Entity_GetLightScale')
     prefix=PREAMBLE.split('char DAT_00559bb4',1)[0]+SERVICES
     if 'AsObject(' in code:
         from ObjectLayoutContract import object_types,record
         from LegacyModelLayout import VIEW
         prefix+="\nusing WORD=std::uint16_t;using vec3_t=float[3];using vec34_t=float[3][4];\n"+object_types()+"\nOBJECT* AsObject(uintptr_t p){return reinterpret_cast<OBJECT*>(p);}\n"
-        prefix+=("\n#pragma pack(push,1)\n"+record(read_source('src/Model/ModelTypes.h'),'BMD')+"\n#pragma pack(pop)\ninline BMD* AsModel(uintptr_t p){return reinterpret_cast<BMD*>(p);}") if native else VIEW
+        prefix+=("\n#pragma pack(push,1)\n"+record(read_source('src/assets/model/ModelTypes.h'),'BMD')+"\n#pragma pack(pop)\ninline BMD* AsModel(uintptr_t p){return reinterpret_cast<BMD*>(p);}") if native else VIEW
 
     header,definitions=read_source('src/globals.h',revision),read_source('src/globals.cpp',revision)
     for name in sorted(set(re.findall(r'_DAT_[0-9a-f]+',code))):
-        prefix+=re.search(rf'extern [^;\n]*\b{name}\s*;',header).group()
-        prefix+=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M).group()
+        prefix+=optional_definition(re.search(rf'extern [^;\n]*\b{name}\s*;',header))
+        prefix+=optional_definition(re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',definitions,re.M))
     arg='reinterpret_cast<uintptr_t>(PTR)' if 'uintptr_t param_1' in code else 'static_cast<int>(reinterpret_cast<uintptr_t>(PTR))'
     main=MAIN.replace('static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(owner))','reinterpret_cast<std::uintptr_t>(owner)') if 'AsObject(' in code else MAIN
     if native:

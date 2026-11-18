@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Run from the repository root after publishing the server image for both architectures.
 RELEASE_DIR=${RELEASE_DIR:-dist/pterodactyl-release}
-SERVER_IMAGE=${SERVER_IMAGE:-emapupi/mu-linux-97k:0.97.43}
+VERSION=${VERSION:-0.97.45}
+SERVER_IMAGE=${SERVER_IMAGE:-emapupi/mu-linux-97k:$VERSION}
 
 if [ "$RELEASE_DIR" != "dist/pterodactyl-release" ]; then
   echo "For safety, RELEASE_DIR must be dist/pterodactyl-release" >&2
@@ -34,7 +35,7 @@ package_server() {
 package_server linux/amd64 amd64
 package_server linux/arm64 arm64
 tar --exclude='node_modules' --exclude='.env' -C web -czf "$RELEASE_DIR/mu-linux-97k-web.tar.gz" .
-python3 - "$RELEASE_DIR/Pterodactyl-eggs-0.97.43.zip" 'Pterodactyl eggs' <<'PY'
+python3 - "$RELEASE_DIR/Pterodactyl-eggs-$VERSION.zip" 'Pterodactyl eggs' <<'PY'
 import pathlib
 import sys
 import zipfile

@@ -16,6 +16,12 @@ from SceneObjectPointer import build_and_run, function, read_source
 from X86Views import CLOTH_MODEL_MESH, model_view
 from LegacyEntityLayout import opaque_cloth_fields
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 SERVICES = r'''
 #include <array>
 #include <string>
@@ -33,7 +39,6 @@ OBJECT* AsObject(void* p) { return static_cast<OBJECT*>(p); }
 OBJECT* AsObject(std::uintptr_t p) { return reinterpret_cast<OBJECT*>(p); }
 CONSTANTS
 GLOBALS
-#define DAT_07abf5d0 CharactersClient
 DWORD HeroIndex;
 struct Map { int world; int GetCurrentMap() const { return world; } } gMapManager;
 BYTE* expectedSlot;
@@ -118,7 +123,7 @@ std::uint64_t RunPool(BYTE* pool, bool safe) {
     return digest;
 }
 std::uint64_t RunMonsters(BYTE* pool, BYTE* models, bool safe) {
-    CharactersClient = reinterpret_cast<std::uintptr_t>(pool); DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models); safeMode = safe;
+    CharactersClient = reinterpret_cast<std::uintptr_t>(pool); Models = reinterpret_cast<std::uintptr_t>(models); safeMode = safe;
     std::vector<BYTE> canonical(1024*188, 0xa5);
     for(int i = 0; i < 1024; ++i) { const short limit = 256; std::memcpy(canonical.data() + i*188 + 38, &limit, 2); std::memset(canonical.data() + i*188 + 40, 0, 8); }
     std::uint64_t digest = 14695981039346656037ull; int cases = 0;
@@ -126,8 +131,8 @@ std::uint64_t RunMonsters(BYTE* pool, BYTE* models, bool safe) {
     for(unsigned index = 0; index < 259; ++index)
     for(int world : worlds) for(int mode = 0; mode < 3; ++mode) {
         const unsigned type = index < 256 ? index : index == 256 ? 256u : index == 257 ? 511u : 0xffffffffu;
-        const auto& def = type < MonsterDefinitions.size() ? MonsterDefinitions[type] : DefaultMonsterDefinition;
-        if(safe && mode != 1 && def.Initialize == InitializeMonsterJoints) continue;
+        DEFINITION_LOOKUP
+        if(safe && mode != 1 && IS_INIT(def, Joints)) continue;
         std::memset(pool, 0xa5, 401*916); for(int i = 0; i < 400; ++i) AsCharacter(pool + 916*i)->Object.Live = 0;
         const int slot = int(index % 400), key = 5000 + int(index); expectedSlot = pool + slot*916;
         const bool allocate = !safe && index % 2 == 0;
@@ -137,7 +142,7 @@ std::uint64_t RunMonsters(BYTE* pool, BYTE* models, bool safe) {
         const int x = int(index * 13 % 512) - 128, y = int(index * 7 % 512) - 128;
         expectedX = BYTE(x); expectedY = BYTE(y); expectedRotation = 0;
         std::memcpy(models, canonical.data(), canonical.size()); auto expectedModels = canonical;
-        if(mode != 1 && def.Initialize == InitializeMonster77) expectedModels[61236] = 0;
+        if(mode != 1 && IS_INIT(def, 77)) expectedModels[61236] = 0;
         gMapManager.world = world; gContentCatalog.mode = mode; HeroIndex = 0x12345678u;
         events.clear(); savedName.clear(); ctorCalls = cleanupCalls = jointCalls = 0;
         char* created = CreateMonster(type, x, y, key, -123);
@@ -145,7 +150,7 @@ std::uint64_t RunMonsters(BYTE* pool, BYTE* models, bool safe) {
         Require(std::memcmp(models, expectedModels.data(), expectedModels.size()) == 0);
         Require(AsCharacter(created)->MonsterIndex == BYTE(type) && WORD(AsCharacter(created)->TargetCharacter) == WORD(HeroIndex));
         const char* name = getMonsterName(int(type)); if(mode == 1 && !name[0]) name = "custom"; Require(savedName == name);
-        if(mode != 1 && def.Initialize == InitializeMonsterJoints) Require(jointCalls == 2); else Require(jointCalls == 0);
+        if(mode != 1 && IS_INIT(def, Joints)) Require(jointCalls == 2); else Require(jointCalls == 0);
         digest = HashBytes(digest, created, 916); for(int event : events) digest = HashBytes(digest, &event, 4);
         digest = HashBytes(digest, savedName.data(), int(savedName.size())); ++cases;
     }
@@ -173,7 +178,7 @@ int main() {
 
 def harness(revision=None):
     prefix = PREAMBLE.split("BYTE* reservation;", 1)[0].replace("0x10000", "0x100000")
-    types = read_source("src/Entity/EntityTypes.h", revision)
+    types = read_source("src/game/entity/EntityTypes.h", revision)
     obj = re.search(r"struct OBJECT\s*\{.*?\};", types, re.S).group()
     # Son campos opacos de 32 bits en este fixture; no se certifican como punteros.
     obj = re.sub(r"OBJECT\*\s+Owner", "std::uint32_t Owner", obj)
@@ -184,20 +189,41 @@ def harness(revision=None):
         records += re.search(rf"struct {name}\s*\{{.*?\}};", types, re.S).group()
     records += "\n#pragma pack(pop)\n"
     records = opaque_cloth_fields(records)
-    constants = "\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;", read_source("src/Item/ItemDefines.h", revision), re.M))
+    constants = "\n".join(re.findall(r"^constexpr\s+(?:int|short)\s+\w+\s*=[^;]+;", read_source("src/game/item/ItemDefines.h", revision), re.M))
     header, globals_source = read_source("src/globals.h", revision), read_source("src/globals.cpp", revision)
     definitions = ""
-    for name in ("CharactersClient", "DAT_05828d58"):
-        definitions += re.search(rf"extern [^;\n]*\b{name}\s*;", header).group()
+    for name in ("CharactersClient", "Models"):
+        definitions += optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;", header))
         definitions += re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;", globals_source, re.M).group()
-    catalog = re.search(r"struct CatalogMonster\s*\{.*?\};", read_source("src/Item/ContentCatalog.h", revision), re.S).group()
+    catalog = re.search(r"struct CatalogMonster\s*\{.*?\};", read_source("src/assets/data/ContentCatalog.h", revision), re.S).group()
     prefix += SERVICES.replace("RECORDS", records).replace("CONSTANTS", constants).replace("GLOBALS", definitions).replace("CATALOG_RECORD", catalog)
-    prefix += function(read_source("src/Entity/Entity_ActionLegacy.cpp", revision), "SetAction")
-    prefix += function(read_source("src/Render/SMD_Parser.cpp", revision), "SetCharacterScale")
-    monster = read_source("src/Monster/Monster.cpp", revision)
+    prefix += function(read_source("src/game/entity/Entity_ActionLegacy.cpp", revision), "SetAction")
+    prefix += function(read_source("src/render/SMD_Parser.cpp", revision), "SetCharacterScale")
+    monster = read_source("src/game/monster/Monster.cpp", revision)
     factory = monster[monster.index("// IDA: CreateCharacter (0x0045BFA0)"):]
     call = "return reinterpret_cast<std::uintptr_t>(CreateCharacter(key, type, x, y, rotation));" if "CHARACTER* __cdecl CreateCharacter" in factory else "return CreateCharacter(key, type, x, y, rotation);"
-    return prefix + model_view(["Meshs"], revision) + CLOTH_MODEL_MESH + factory + MAIN.replace("CALL_CREATE", call)
+    main = MAIN.replace("CALL_CREATE", call)
+    if "MonsterSpawn_Get" in factory:
+        # Desde T5 las definiciones salen de Content/monster/spawn.toml: se incluye el
+        # lector real (en su propio namespace) y el .toml se copia junto al binario.
+        spawn = read_source("src/game/monster/MonsterSpawnTable.cpp", revision)
+        spawn_header = read_source("src/game/monster/MonsterSpawnTable.h", revision).replace("#pragma once", "")
+        toml = read_source("src/assets/data/TomlLines.h", revision).replace("#pragma once", "")
+        for include in ('#include "stdafx.h"', '#include "game/monster/MonsterSpawnTable.h"',
+                        '#include "assets/data/TomlLines.h"'):
+            spawn = spawn.replace(include, "")
+        spawn = re.sub(r"^#include <[^>]+>\s*$", "", spawn, flags=re.M)
+        spawn = spawn.replace('extern "C" void DbgLogPublic(const char* msg);', "")
+        prefix += ("\n#include <array>\n#include <string>\n#include <vector>\n" + toml +
+                   'extern "C" void DbgLogPublic(const char*) {}\n' +
+                   "namespace spawn_tu {\n" + spawn_header + spawn + "\n}\nusing namespace spawn_tu;\n")
+        main = main.replace("DEFINITION_LOOKUP", "const auto& def = MonsterSpawn_Get(int(type));")
+        main = "\n#define IS_INIT(d, name) ((d).Init == \"Monster\" #name)\n" + main
+    else:
+        main = main.replace("DEFINITION_LOOKUP", "const auto& def = type < MonsterDefinitions.size() ? "
+                                                 "MonsterDefinitions[type] : DefaultMonsterDefinition;")
+        main = "\n#define IS_INIT(d, name) ((d).Initialize == InitializeMonster##name)\n" + main
+    return prefix + model_view(["Meshs"], revision) + CLOTH_MODEL_MESH + factory + main
 
 
 def main():
@@ -210,10 +236,13 @@ def main():
         parser.error("La referencia unsigned int sólo se compara en Windows x86")
     with tempfile.TemporaryDirectory(prefix="mu-character-creation-") as temp:
         directory = Path(temp)
-        current = build_and_run(directory / "current", harness(), args)
+        spawn = (Path(__file__).resolve().parents[1] / "bin/Client/Content/monster/spawn.toml").read_bytes()
+        current = build_and_run(directory / "current", harness(), args,
+                                files={"Content/monster/spawn.toml": spawn})
         print(current, end="")
         if args.reference_ref:
-            reference = build_and_run(directory / "reference", harness(args.reference_ref), args)
+            reference = build_and_run(directory / "reference", harness(args.reference_ref), args,
+                                      files={"Content/monster/spawn.toml": spawn})
             if current != reference:
                 raise RuntimeError("Diferencia con la referencia x86")
             print(f"Equivalencia de bytes/eventos con {args.reference_ref}: OK")

@@ -1,0 +1,602 @@
+#include <cstdint>
+// Chat.cpp
+// In-game chat log rendering and message management.
+//
+// UI_RenderText @ 0x0047f650 — Chat_DrawEntry
+// UI_RenderInputField @ 0x0047f0b0 — Chat_DrawField
+// UI_AddNotice @ 0x0047fae0 — Chat_AddMessage
+// UI_RenderNotices @ 0x0047fce0 — Chat_DrawMessages
+// UI_RenderChatLogOverlay @ 0x00480980 — UI_DrawPlayerList
+// UI_TickHoverBubbles @ 0x004821a0 — UI_TickTooltips
+// Chat_ValidateInputCommand @ 0x00513570 — Chat_ValidateCommand
+//
+// Chat message ring buffer: Notice, 6 slots × 0x108 bytes each
+//   Slot layout: [0x100] char name[], [0x104] flags byte, [0x108] next slot
+// Current message count: DAT_07e11d9c (max 6)
+// Chat scroll timer: NoticeTime (reset to 300 on new message)
+
+#include "stdafx.h"
+#include "game/entity/EntityName.h"
+#include "net/NetText.h"
+#include "ui/ChatTypes.h"
+#include "render/text/TextCore.h"
+#include "render/Gfx.h"
+#include "platform/Text.h"
+#include "app/config/UserSettings.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ScaleGlobalTextSize — corrige el patrón `lVar = __ftol();` de Ghidra.
+//
+// Ghidra dejó en varias funciones de este archivo llamadas a `__ftol()` SIN
+// ARGUMENTOS, que en C leen basura del tope de la pila x87. En el binario real
+// son la conversión del resultado de una división FPU. Verificado contra IDA
+// (RenderText 0x47F650, RenderNotices 0x47FCE0 — ambas idénticas):
+//
+//     GetTextExtentPointA(m_hFontDC, pszText, len, &TextSize);
+//     TextSize.cx = (std::int64_t)((double)TextSize.cx / g_fScreenRate_x);
+//     TextSize.cy = (std::int64_t)((double)TextSize.cy / g_fScreenRate_y);
+//
+// `TextSize` es el par de globals (lpsz_07e113d0 = cx, _DAT_07e113d4 = cy);
+// _DAT_055c9b70 = g_fScreenRate_x, _DAT_055c9b74 = g_fScreenRate_y.
+//
+// Impacto del bug: cualquier layout que dependa del ancho medido quedaba con
+// basura. El caso visible fue el caret `_` del input de chat, que se dibuja en
+// `x + lpsz_07e113d0->cx` y por eso quedaba siempre pegado al inicio.
+// Guarda contra rate 0 (sin inicializar) para no dividir por cero.
+static void ScaleGlobalTextSize(void)
+{
+    float rx = gWindow.GetScreenRateX(), ry = gWindow.GetScreenRateY();
+    if (rx <= 0.0f) rx = 1.0f;
+    if (ry <= 0.0f) ry = 1.0f;
+    g_TextExtent07E113D0.cx = (LONG)((double)g_TextExtent07E113D0.cx / (double)rx);
+    _DAT_07e113d4 = (LONG)((double)(LONG)_DAT_07e113d4 / (double)ry);
+}
+
+
+// FUN_0047F650 @ 0x0047F650 (IDA)
+// UI_RenderText — Chat_DrawEntry
+// Draws one chat entry at screen (param_1, param_2) with text param_3.
+// param_4: max pixel width (truncates lpsz_07e113d0 if exceeded)
+// param_5: style (1=normal, 2=bold via UI_DrawText style param)
+// param_6: extra param forwarded to UI_DrawText
+// Returns packed (width, height) in two halves of undefined8.
+undefined8 __cdecl
+// IDA: FUN_0047F650
+UI_RenderText(undefined4 param_1,undefined4 param_2,LPCSTR param_3,LPSIZE param_4,char param_5,
+            undefined4 param_6)
+{
+  int c;
+  const int maxWidth = (int)(intptr_t)param_4;
+
+  c = Platform::TextLength(param_3);
+  UI_DrawText(param_1,param_2,(char*)param_3,maxWidth,(param_5 != '\0') + 1,param_6, (size_t)c + 1);
+  LPSIZE lpsz = &g_TextExtent07E113D0;
+  gFont.MeasureText(gFont.GetTextDC(),param_3,c,lpsz);
+  if ((0 < maxWidth) && (maxWidth < g_TextExtent07E113D0.cx)) {
+    g_TextExtent07E113D0.cx = maxWidth;
+  }
+  // IDA RenderText @0x47F650: TextSize.cx /= g_fScreenRate_x; .cy /= g_fScreenRate_y;
+  ScaleGlobalTextSize();
+  // IDA devuelve &TextSize; el CONCAT44 con lVar1>>32 era ruido de Ghidra
+  // (par de registros del retorno de 64 bits).
+  return (undefined8)(uintptr_t)&g_TextExtent07E113D0;
+}
+
+
+// FUN_0047F0B0 @ 0x0047F0B0 (IDA)
+// UI_RenderInputField — Chat_DrawField
+// Draws an input field character at (param_1, param_2) for field index param_3.
+// Masks characters with '*' if field type is password (InputTextHide[param_3]==1).
+// Shows partial mask (first 7 chars visible) for type 2.
+// Also draws a blinking '_' or IME composition after the active field.
+// IDA: FUN_0047F0B0
+void __cdecl UI_RenderInputField(int x, undefined4 y, int index)
+{
+    // IDA 0x47F0B0: sub esp,100h; Text starts at [esp+10h] after
+    // four register pushes. This is ONE 256-byte array, not independent
+    // local_100/local_fc/local_fa/auStack_f9 variables whose order MSVC can change.
+    char text[256];
+    const char* input = InputText[index];
+    const char hide = InputTextHide[index];
+    m_dwTextColor = 0xffd2e6ff;
+    SetBackgroundTextColor = 0;
+
+    if (hide == 1 || hide == 2) {
+        // DESVIACION (Fase 4, texto Unicode): un '*' por letra visible, no por
+        // byte; el prefijo visible del modo 2 (IDA: 7 bytes) se corta sin
+        // partir una letra.
+        const std::string_view value(input);
+        size_t shown = hide == 2 ? TextEngine::FitBytes(value, 7) : 0;
+        memcpy(text, input, shown);
+        size_t i = shown;
+        const size_t stars = TextEngine::ClusterCount(value.substr(shown));
+        for (size_t n = 0; n < stars && i + 1 < sizeof(text); ++n) text[i++] = '*';
+        text[i] = 0;
+    } else {
+        strcpy(text, input);
+    }
+
+    const int width = (int)InputTextWidth;
+    UI_DrawText(x, y, text, width, 1, 0, sizeof(text));
+    gFont.MeasureText(gFont.GetTextDC(), text, Platform::TextLength(text), &g_TextExtent07E113D0);
+    if (width > 0 && g_TextExtent07E113D0.cx > width)
+        g_TextExtent07E113D0.cx = width;
+    ScaleGlobalTextSize();
+
+    if (index == InputIndex) {
+        const DWORD frame = InputFrame;
+        if ((frame & 1) == 0) {
+            // IDA 0x47F25B: lea esi, InputTextIME[index*4]. Taking
+            // &DAT_07e11cec would multiply by the whole 40-byte array again.
+            const char* cursor = DAT_07e11cec + index * 4;
+            size_t cursorCapacity = 4;
+            if (*cursor == 0) { cursor = "_"; cursorCapacity = 2; }
+            else if (hide == 1) { cursor = "**"; cursorCapacity = 3; }
+            UI_DrawText(x + g_TextExtent07E113D0.cx, y, (char*)cursor, 0, 1, 0, cursorCapacity);
+            gFont.MeasureText(gFont.GetTextDC(), cursor, Platform::TextLength(cursor), &g_TextExtent07E113D0);
+            ScaleGlobalTextSize();
+        }
+    }
+}
+
+
+// FUN_0047FAE0 @ 0x0047FAE0 (IDA)
+// UI_AddNotice — Chat_AddMessage
+// Appends a chat message string param_1 (with flag param_2) to the ring buffer.
+// Ring buffer: Notice, 6 slots × 0x108 bytes.
+// If count > 5: shifts buffer down (oldest discarded). Handles long lines by
+// splitting via CutText into first/overflow parts.
+// Resets scroll timer NoticeTime to 300.
+// IDA: FUN_0047FAE0
+void __cdecl UI_AddNotice(char *param_1,unsigned char param_2)
+{
+    // IDA: CreateNotice (0x0047FAE0).  Aviso azul del centro: 6 slots de 264
+    // bytes (texto en +0, color en +260).  Si el texto mide 256 px o mas se
+    // parte con CutText: la primera mitad va al slot actual y la segunda al
+    // siguiente, los dos con el mismo color.
+    if (!param_1) return;
+    char *notice = (char *)&Notice[0];
+
+    gFont.SelectFont(gFont.GetTextDC(), gFont.GetFont(FONT_BOLD));
+    SIZE sz = {0, 0};
+    gFont.MeasureText(gFont.GetTextDC(), param_1, Platform::TextLength(param_1), &sz);
+
+    auto shiftUp = [notice]() {
+        for (int s = 0; s < 5; ++s) {
+            char *dst = notice + s * 264;
+            dst[260] = dst[524];
+            strcpy(dst, dst + 264);
+        }
+    };
+
+    int cur = DAT_07e11d9c;
+    if (cur > 5) {
+        DAT_07e11d9c = 5;
+        shiftUp();
+        cur = DAT_07e11d9c;
+    }
+    notice[264 * cur + 260] = (char)param_2;
+
+    const char *text = param_1;
+    char *dst;
+    char text1[256], text2[256];
+    if (sz.cx >= 256) {
+        CutText(param_1, text1, text2, (int)strlen(param_1));
+        int next = DAT_07e11d9c + 1;
+        strcpy(notice + 264 * DAT_07e11d9c, text2);
+        if (next > 5) {
+            next = 5;
+            shiftUp();
+        }
+        notice[264 * next + 260] = (char)param_2;
+        dst = notice + 264 * next;
+        DAT_07e11d9c = next + 1;
+        text = text1;
+    } else {
+        dst = notice + 264 * cur;
+        DAT_07e11d9c = cur + 1;
+    }
+    NoticeTime = 300;          // NoticeTime
+    strcpy(dst, text);
+    return;
+}
+
+
+// FUN_0047FCE0 @ 0x0047FCE0 (IDA)
+// UI_RenderNotices — Chat_DrawMessages
+// Renders all system/global messages from Notice in the 2D overlay.
+// Iterates up to 6 slots starting at y=300, spacing 13 pixels.
+// Colour: DAT_00559c78/80 set per-slot based on flag byte [0x104].
+// Also measures text extent for cursor/scroll calculations.
+// IDA: FUN_0047FCE0
+void UI_RenderNotices(void)
+{
+    // DESVIACION (DLL Antilag, ret en 0x0047FCE0): sin interfaz no hay avisos.
+    if (gUserSettings.GetAntilag(ANTILAG_INTERFACE)) return;
+  // Notice tiene 6 slots × 0x108: se recorre con un contador explícito
+  // de 6 iteraciones, no con el bound literal del binario (`< 0x7db8708`).
+  int iVar1;
+  LPCSTR lpString;
+  int iVar2;
+  longlong lVar3;
+  tagSIZE *lpsz;
+  LPSIZE lpsz_00;
+  tagSIZE local_8;
+
+  GL_SetBlendSrcOver('\x01');
+  gFont.SelectFont(gFont.GetTextDC(),(HGDIOBJ)gFont.GetFont(FONT_BOLD));
+  Gfx::Color3f(1.0f, 1.0f, 1.0f);
+  iVar2 = 300;
+  lpString = (LPCSTR)&Notice[0];
+  for (int slot = 0; slot < 6; ++slot) {
+    SetBackgroundTextColor = 0x80000000;
+    if (lpString[0x104] == '\0') {
+      m_dwTextColor = ((4 < (int)NoticeInverse % 10) - 1 & 0x81000000) - 0xaf3701;
+    }
+    else {
+      m_dwTextColor = -0x37009c;
+    }
+    lpsz = &local_8;
+    iVar1 = Platform::TextLength(lpString);
+    gFont.MeasureText(gFont.GetTextDC(),lpString,iVar1,lpsz);
+    iVar1 = iVar2;
+    if (g_bUseChatListBox == 1) {
+      iVar1 = iVar2 + -0x118;
+    }
+    UI_DrawText(0x140 - ((uint)(local_8.cx * 0x280) / gWindow.GetWidth() >> 1),iVar1,(char*)lpString,0,1,0, 256);
+    lpsz_00 = &g_TextExtent07E113D0;
+    iVar1 = Platform::TextLength(lpString);
+    gFont.MeasureText(gFont.GetTextDC(),lpString,iVar1,lpsz_00);
+    // IDA RenderNotices @0x47FCE0 hace exactamente esto acá.
+    ScaleGlobalTextSize();   // era `__ftol()` sin args — ver helper arriba
+    lpString = lpString + 0x108;
+    iVar2 = iVar2 + 0xd;
+  }
+  return;
+}
+
+
+// FUN_00480980 @ 0x00480980 (IDA)
+// UI_RenderChatLogOverlay — UI_DrawPlayerList
+// Draws the nearby-player list overlay (chat/notification area).
+// Each slot entry: player name, colour-coded by channel type (0-5).
+// Flashes the line if it matches the local player name + cursor mod.
+// Layout: 5 visible lines at y=0..0x4d, spacing 13 pixels.
+// IDA: FUN_00480980
+void UI_RenderChatLogOverlay(void)
+{
+  byte bVar1;
+  undefined4 uVar2;
+  int iVar3;
+  byte *pbVar4;
+  int iVar5;
+  byte *pbVar6;
+  int iVar7;
+  bool bVar8;
+  longlong lVar9;
+  tagSIZE *lpsz;
+  LPSIZE lpsz_00;
+  int local_10c;
+  tagSIZE local_108;
+  CHAR local_100 [256];
+
+  // 0x3f800000 (IDA) son los bits de 1.0f, no el int 1065353216.
+  Gfx::Color3f(1.0f, 1.0f, 1.0f);
+  gFont.SelectFont(gFont.GetTextDC(),(HGDIOBJ)gFont.GetFont(FONT_NORMAL));
+  iVar7 = 0;
+  local_10c = 0;
+  do {
+    iVar5 = DAT_00559ce0 + local_10c;
+    // Stride real del ring buffer = 280 bytes = 0x118 (IDA sub_480980 y
+    // UIChatLogWindow_AddText). Ghidra decompila el acceso byte con *0x46 (= 70)
+    // porque dword_7DF948C está tipado int[]: los accesos DWORD con índice 0x46
+    // sí dan 280 bytes, pero los accesos byte necesitan *0x118.
+    pbVar6 = (byte *)(DAT_07df9380 + iVar5 * 0x118);
+    if ((*(char *)(&DAT_07df938b + iVar5 * 0x118) != '\0') &&
+       ((DAT_00559bf1 != '\0' || ((&DAT_07df948c)[iVar5 * 0x46] != 3)))) {
+      switch((&DAT_07df948c)[iVar5 * 0x46]) {
+      case 0:
+        m_dwTextColor = 0xff000000;
+        SetBackgroundTextColor = 0x9632c8ff;
+        break;
+      case 1:
+        m_dwTextColor = 0xffff9664;
+        SetBackgroundTextColor = 0x96000000;
+        break;
+      case 2:
+        m_dwTextColor = 0xff001eff;
+        SetBackgroundTextColor = 0x96000000;
+        break;
+      case 3:
+        m_dwTextColor = 0xffc8dce6;
+        SetBackgroundTextColor = 0x96000000;
+        break;
+      case 4:
+        m_dwTextColor = 0xff000000;
+        SetBackgroundTextColor = 0x96ffc800;
+        break;
+      case 5:
+        m_dwTextColor = 0xff000000;
+        SetBackgroundTextColor = 0xc896ff00;
+      }
+      // Port exacto de IDA (Ghidra pierde los varargs de sprintf):
+      //   name  @ DAT_07df9380 + slot*280       (offset 0)
+      //   msg   @ DAT_07df9380 + slot*280 + 11  (offset 0x0B)
+      //   - Si los primeros 2 bytes del slot son 0x20 0x20 → "%s%s"  (sin dos puntos)
+      //   - Si name[0] != 0                               → "%s: %s"
+      //   - Si name[0] == 0                               → "%s"    (solo msg)
+      // Las DAT_00559d4c/54/5c originales eran estos mismos formatos pero en
+      // el binario aparecen como strings separados; en nuestro build están
+      // declaradas como empty-string (char=0), así que usamos literales.
+      {
+        const char *name_ptr = (const char *)(DAT_07df9380 + iVar5 * 0x118);
+        const char *msg_ptr  = (const char *)(DAT_07df9380 + iVar5 * 0x118 + 0x0B);
+        if (name_ptr[0] == ' ' && name_ptr[1] == ' ') {
+          crt_sprintf(local_100, "%s%s", name_ptr, msg_ptr);
+        } else if (name_ptr[0] == 0) {
+          crt_sprintf(local_100, "%s", msg_ptr);
+        } else {
+          crt_sprintf(local_100, "%s: %s", name_ptr, msg_ptr);
+        }
+      }
+      lpsz = &local_108;
+      iVar3 = Platform::TextLength(local_100);
+      gFont.MeasureText(gFont.GetTextDC(),local_100,iVar3,lpsz);
+      iVar3 = (int)MouseX;
+      // DESVIACION (Fase 4, pantalla ancha): las líneas van pegadas al borde
+      // izquierdo de la ventana (x = -shift), no al del 4:3.
+      bVar8 = gWindow.PanelOrigin(Ui::WindowLeft) - 1 < iVar3;
+      // &DAT_07df9494 es int* (alias a offset
+      // 0x114 del buffer), sumarle iVar5*0x118 como int* avanzaría 4x. Casteo
+      // a char* antes de sumar el stride-en-bytes 0x118 para que el LONG
+      // aterrice en el slot correcto.
+      *(LONG *)((char *)&DAT_07df9494 + iVar5 * 0x118) = local_108.cx;
+      uVar2 = SetBackgroundTextColor;
+      if (((((bVar8) && (iVar3 < (int)((uint)(local_108.cx * 0x280) / gWindow.GetWidth()) + gWindow.PanelOrigin(Ui::WindowLeft))) &&
+           (iVar7 <= MouseY)) && ((MouseY < iVar7 + 0xd && (InputEnable != '\0')))) &&
+         (*(char *)&((CHARACTER*)(uintptr_t)(Hero))->SafeZone != '\0')) {
+        pbVar4 = (byte *)EntityName::Get(Hero);
+        do {
+          bVar1 = *pbVar6;
+          bVar8 = bVar1 < *pbVar4;
+          if (bVar1 != *pbVar4) {
+LAB_00480b89:
+            iVar5 = (1 - (uint)bVar8) - (uint)(bVar8 != 0);
+            goto LAB_00480b8e;
+          }
+          if (bVar1 == 0) break;
+          bVar1 = pbVar6[1];
+          bVar8 = bVar1 < pbVar4[1];
+          if (bVar1 != pbVar4[1]) goto LAB_00480b89;
+          pbVar6 = pbVar6 + 2;
+          pbVar4 = pbVar4 + 2;
+        } while (bVar1 != 0);
+        iVar5 = 0;
+LAB_00480b8e:
+        if ((iVar5 != 0) && (DAT_07e11da8 % 6 < 3)) {
+          SetBackgroundTextColor = m_dwTextColor;
+          m_dwTextColor = uVar2;
+        }
+      }
+      UI_DrawText(gWindow.PanelOrigin(Ui::WindowLeft),iVar7,local_100,0,1,0, sizeof(local_100));
+      lpsz_00 = &g_TextExtent07E113D0;
+      iVar5 = Platform::TextLength(local_100);
+      gFont.MeasureText(gFont.GetTextDC(),local_100,iVar5,lpsz_00);
+      ScaleGlobalTextSize();   // era `__ftol()` sin args — ver helper arriba
+    }
+    iVar7 = iVar7 + 0xd;
+    local_10c = local_10c + 1;
+    if (0x4d < iVar7) {
+      return;
+    }
+  } while( true );
+}
+
+
+// FUN_004821A0 @ 0x004821A0 (IDA)
+// UI_TickHoverBubbles — UI_TickTooltips
+// Ticks floating tooltip/bubble widgets stored in the DAT_07e01720 ring.
+// Each entry: timers (3 ints), target entity ptr, screen XYWH (4 ints).
+// Decrements timers; clears timer if entity is dead/inactive.
+// On mouse-over (cursor inside widget XYWH + hover flag set + entity is local
+// player's target): copies entity name into DAT_07db8810, calls PlayBuffer
+// to trigger a UI sound.
+// IDA: FUN_004821A0
+void UI_TickHoverBubbles(void)
+{
+  CHAT* chats = AsChat(DAT_07e016f8);
+  const int count = (int)(sizeof(DAT_07e016f8) / sizeof(CHAT));   // 100
+  for (int i = 0; i < count; ++i) {
+    CHAT* c = &chats[i];
+    if (0 < c->IDLifeTime) {
+      c->IDLifeTime = c->IDLifeTime + -1;
+    }
+    if (0 < c->LifeTime[0]) {
+      c->LifeTime[0] = c->LifeTime[0] + -1;
+    }
+    if (0 < c->LifeTime[1]) {
+      c->LifeTime[1] = c->LifeTime[1] + -1;
+    }
+    const char* owner = (const char*)c->Owner;
+    if ((owner != nullptr) && ((*owner == '\0' || (FieldAs(owner, AsObject(owner)->Visible) == '\0')))) {
+      c->IDLifeTime = 0;
+      c->LifeTime[0] = 0;
+      c->LifeTime[1] = 0;
+    }
+    // Click derecho sobre el nombre de otro jugador (estando en zona segura):
+    // lo copia al campo de destinatario del whisper.
+    if ((c->x <= MouseX) &&
+        (MouseX < (int)((uint)(c->Width * 0x280) / gWindow.GetWidth() + c->x)) &&
+        (c->y <= MouseY) &&
+        (MouseY < (int)((uint)(c->Height * 0x1e0) / gWindow.GetHeight() + c->y)) &&
+        (InputEnable != '\0') && (AsCharacter(Hero)->SafeZone != '\0') &&
+        strcmp(ChatDisplayName(c), EntityName::Get(Hero)) != 0 &&
+        (MouseRButtonPush != '\0')) {
+      TextEngine::CopyTruncated((char *)DAT_07db8810, NetText::CharacterNameSize + 1, ChatDisplayName(c));
+      DAT_07d780ac = (DWORD)strlen((char *)DAT_07db8810);
+      MouseRButtonPush = '\0';
+      PlayBuffer(0x19,0,0);
+    }
+  }
+}
+
+
+// FUN_00513570 @ 0x00513570 (IDA)
+// Chat_ValidateInputCommand — Chat_ValidateCommand
+// Checks if the text in DAT_07db8710 is a known chat command or valid chat text.
+// Strips spaces, then looks up in two command tables (DAT_07d27610, DAT_07d73104).
+// Also rejects strings matching hard-coded blocked strings (webzen brand names).
+// Returns 1 (non-zero low byte) if the text should be blocked/consumed.
+// IDA: FUN_00513570
+char Chat_ValidateInputCommand(void)
+{
+  char cVar1;
+  uint uVar2;
+  int iVar3;
+  int iVar4;
+  char *pcVar5;
+  char local_100 [256];
+
+  uVar2 = 0xffffffff;
+  iVar3 = 0;
+  iVar4 = 0;
+  pcVar5 = (char *)InputText;
+  do {
+    if (uVar2 == 0) break;
+    uVar2 = uVar2 - 1;
+    cVar1 = *pcVar5;
+    pcVar5 = pcVar5 + 1;
+  } while (cVar1 != '\0');
+  if (0 < (int)(~uVar2 - 1)) {
+    do {
+      if (((char*)InputText)[iVar3] != ' ') {
+        local_100[iVar4] = ((char*)InputText)[iVar3];
+        iVar4 = iVar4 + 1;
+      }
+      uVar2 = 0xffffffff;
+      iVar3 = iVar3 + 1;
+      pcVar5 = (char *)InputText;
+      do {
+        if (uVar2 == 0) break;
+        uVar2 = uVar2 - 1;
+        cVar1 = *pcVar5;
+        pcVar5 = pcVar5 + 1;
+      } while (cVar1 != '\0');
+    } while (iVar3 < (int)(~uVar2 - 1));
+  }
+  local_100[iVar4] = '\0';
+  iVar3 = 0;
+  if (0 < DAT_07d78074) {
+    pcVar5 = DAT_07d27610;
+    do {
+      uVar2 = FindTextA(local_100,pcVar5,'\0');
+      if ((char)uVar2 != '\0') goto LAB_00513792;
+      iVar3 = iVar3 + 1;
+      pcVar5 = pcVar5 + 0x14;
+    } while (iVar3 < DAT_07d78074);
+  }
+  if ((char)(uintptr_t)InputText != '/') {
+    uVar2 = 0xffffffff;
+    iVar3 = 0;
+    iVar4 = 0;
+    pcVar5 = (char *)InputText;
+    do {
+      if (uVar2 == 0) break;
+      uVar2 = uVar2 - 1;
+      cVar1 = *pcVar5;
+      pcVar5 = pcVar5 + 1;
+    } while (cVar1 != '\0');
+    if (0 < (int)(~uVar2 - 1)) {
+      do {
+        if (((char*)InputText)[iVar3] != ' ') {
+          local_100[iVar4] = ((char*)InputText)[iVar3];
+          iVar4 = iVar4 + 1;
+        }
+        uVar2 = 0xffffffff;
+        iVar3 = iVar3 + 1;
+        pcVar5 = (char *)InputText;
+        do {
+          if (uVar2 == 0) break;
+          uVar2 = uVar2 - 1;
+          cVar1 = *pcVar5;
+          pcVar5 = pcVar5 + 1;
+        } while (cVar1 != '\0');
+      } while (iVar3 < (int)(~uVar2 - 1));
+    }
+    local_100[iVar4] = '\0';
+    iVar3 = 0;
+    if (0 < DAT_07d78070) {
+      pcVar5 = DAT_07d73104;
+      do {
+        uVar2 = FindTextA(local_100,pcVar5,'\0');
+        if ((char)uVar2 != '\0') goto LAB_00513792;
+        iVar3 = iVar3 + 1;
+        pcVar5 = pcVar5 + 0x14;
+      } while (iVar3 < DAT_07d78070);
+    }
+  }
+  uVar2 = FindTextA((char *)InputText,(char *)&DAT_00561740,'\0');
+  if ((char)uVar2 == '\0') {
+    uVar2 = FindTextA((char *)InputText,(char *)&DAT_00561744,'\0');
+    if ((char)uVar2 == '\0') {
+      uVar2 = FindTextA((char *)InputText,(char *)&DAT_00561748,'\0');
+      if ((char)uVar2 == '\0') {
+        uVar2 = FindTextA((char *)InputText,(char *)&DAT_0056174c,'\0');
+        if ((char)uVar2 == '\0') {
+          uVar2 = FindTextA((char *)InputText,(char *)&DAT_00561750,'\0');
+          if ((char)uVar2 == '\0') {
+            uVar2 = FindTextA((char *)InputText,"Webzen",'\0');
+            if ((char)uVar2 == '\0') {
+              uVar2 = FindTextA((char *)InputText,"WebZen",'\0');
+              if ((char)uVar2 == '\0') {
+                uVar2 = FindTextA((char *)InputText,"webzen",'\0');
+                if ((char)uVar2 == '\0') {
+                  uVar2 = FindTextA((char *)InputText,"WEBZEN",'\0');
+                  if ((char)uVar2 == '\0') {
+                    uVar2 = FindTextA((char *)InputText,&DAT_07d4b4b0,'\0');
+                    if ((char)uVar2 == '\0') {
+                      uVar2 = FindTextA((char *)InputText,&DAT_07d4b5dc,'\0');
+                      if ((char)uVar2 == '\0') {
+                        return uVar2;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+LAB_00513792:
+  return CONCAT31((uVar2 >> 8),1);
+}
+
+void ChatListBox_TickPresentation();
+// DESVIACION: parpadeos y alpha avanzan con los pasos SIM, no con los draws.
+void Chat_TickPresentation() {
+    const bool ready = SceneFlag == 2 ? InitLogIn != 0 :
+        SceneFlag == 4 ? CharSelectSceneInitialized && CurrentProtocolState > 50 :
+        SceneFlag == 5 && EnableMainRender && LoadingWorld <= 30;
+    if (!ready) return;
+    if (!gUserSettings.GetAntilag(ANTILAG_INTERFACE)) ++NoticeInverse;
+    if (g_bUseChatListBox == 1 || SceneFlag != 5) ++DAT_07e11da8;
+    // Contar sólo campos que dibujarían el caret activo. Hay dos entradas
+    // legacy del mismo renderer y pueden coincidir chat, diálogo y panel.
+    const int index=InputIndex;
+    int cursors=0;
+    if (SceneFlag==2 && LoginSubState>1 && LoginSubState<4 && (index==0 || index==1)) ++cursors;
+    if (SceneFlag==4 && LoginSubState>26 && LoginSubState<29 &&
+        (int)DAT_005616b0>=0 && index==0) ++cursors;
+    if (SceneFlag==5 && !gUserSettings.GetAntilag(ANTILAG_INTERFACE)) {
+        if ((InputEnable || TabInputEnable) && (index==0 || index==1)) ++cursors;
+        if (GuildCreatorOpened && g_iKeyPadEnable && index==0) ++cursors;
+        if (GoldenArcherOpenType==3 && index==0) ++cursors;
+    }
+    if (index==0 && (ErrorMessage==MESSAGE_INPUT_GOLD || ErrorMessage==MESSAGE_DELETE_CHARACTER ||
+        ErrorMessage==MESSAGE_DELETE_GUILD || ErrorMessage==MESSAGE_LOCK_STORAGE)) ++cursors;
+    InputFrame+=cursors;
+    if (SceneFlag == 5 && !gUserSettings.GetAntilag(ANTILAG_INTERFACE))
+        ChatListBox_TickPresentation();
+}

@@ -13,6 +13,12 @@ import tempfile
 from ItemConvertPointer import harness as convert_harness
 from SceneObjectPointer import build_and_run, function, read_source
 
+
+def optional_definition(match):
+    # Desde la T8o los DAT_ sin uso no están en globals: el código actual no los
+    # necesita y las revisiones viejas (--reference-ref) siguen encontrándolos.
+    return match.group() if match else ''
+
 MAIN = r'''
 int Rounded(int value) { return value>=1000?100*(value/100):value>=100?10*(value/10):value; }
 std::uint64_t RunValue(BYTE* memory,BYTE* tableMemory) {
@@ -70,12 +76,12 @@ def harness(revision=None):
     prefix+="\n#ifndef _WIN32\n#define __forceinline inline\n#endif\n"
     header,definitions=read_source("src/globals.h",revision),read_source("src/globals.cpp",revision)
     name="DAT_055c9e44"
-    prefix+=re.search(rf"extern [^;\n]*\b{name}\s*;",header).group()
-    prefix+=re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M).group()
+    prefix+=optional_definition(re.search(rf"extern [^;\n]*\b{name}\s*;",header))
+    prefix+=optional_definition(re.search(rf"^[^/\n]*\b{name}\s*=\s*[^;]+;",definitions,re.M))
     prefix+=re.search(r"static __forceinline [^\n]*\bItemAttribute_Base\([^\{]*\{.*?^\}",header,re.M|re.S).group()
     prefix+="\n".join(re.findall(r"^inline (?:const )?ITEM\* AsItem[^\n]+",read_source("src/structs.h",revision),re.M))
     prefix+="\nunsigned int Item_CalculateMaxDurability(void*,ITEM_ATTRIBUTE*,int) { Require(false); return 0; }\n"
-    return prefix+function(read_source("src/Item/Item_Durability.cpp",revision),"ItemValue_Vanilla")+MAIN
+    return prefix+function(read_source("src/game/item/Item_Durability.cpp",revision),"ItemValue_Vanilla")+MAIN
 
 
 def main():

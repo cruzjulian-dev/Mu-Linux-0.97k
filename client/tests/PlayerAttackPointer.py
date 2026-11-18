@@ -18,7 +18,7 @@ int attackSpeedCalls;
 void SetAttackSpeed() { ++attackSpeedCalls; events.push_back(40000); }
 void CallAttack(CHARACTER* character) { CALL_ATTACK; }
 std::uint64_t RunAttack(CHARACTER* character, BYTE* models, BYTE* items) {
-    DAT_05828d58 = reinterpret_cast<std::uintptr_t>(models);
+    Models = reinterpret_cast<std::uintptr_t>(models);
     DAT_07d78068 = reinterpret_cast<std::uintptr_t>(items + 65536);
     activeCharacter = character; g_EnableSound = TRUE;
     for(int slot = 0; slot < 420; ++slot) { MaxBufferChannel[slot] = 4; Enable3DSound[slot] = true; }
@@ -100,7 +100,7 @@ def harness(revision=None):
     record = "\n".join(re.findall(r"^#define\s+(?:MAX_CLASS|MAX_RESISTANCE)\s+[^\n]+", structs, re.M))
     record += "\n" + re.search(r"struct ITEM_ATTRIBUTE\b.*?\n\};", structs, re.S).group()
     record += "\nstatic_assert(sizeof(ITEM_ATTRIBUTE) == 64 && offsetof(ITEM_ATTRIBUTE, TwoHand) == 30);\n"
-    attack = function(read_source("src/Scene/Scene_CharSelect_Nav.cpp", revision), "SetPlayerAttack").replace("rand()", "NextRandom()")
+    attack = function(read_source("src/scenes/Scene_CharSelect_Nav.cpp", revision), "SetPlayerAttack").replace("rand()", "NextRandom()")
     arg = "character" if "CHARACTER* character" in attack else "static_cast<int>(reinterpret_cast<std::uintptr_t>(character))"
     # La definición de SetAttackSpeed precede a la función extraída.
     services, main = MAIN.split("void CallAttack", 1)

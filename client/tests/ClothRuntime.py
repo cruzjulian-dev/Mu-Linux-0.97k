@@ -8,16 +8,16 @@ from SceneObjectPointer import build_and_run, read_source
 from ObjectLayoutContract import record
 
 SOURCES = {
-    "src/Physics/Cloth_Simulation.cpp": "Vec3_Length SpringNode_Delta Cloth_SpringRange Cloth_SpringEqual ClothNode_ApplyForces VerletSystem_Flush SpringNode_ZeroFields SpringNode_SetPos SpringNode_GetPos VerletNode_AddAccel ClothNode_Integrate ClothNode_AddCorrection SpringNode_Ctor VerletNode_SetTarget VerletNode_GetPos VerletNode_ZeroFields VerletNode_CtorBase VerletNode_CtorExt ClothAnchor_Ctor ClothAnchor_SetParams ClothAnchor_Collide Cloth_CollideAnchors Cloth_PinTopRow Cloth_Wind Cloth_Integrate Spring_StoreEdge ClothAnchor_VSlot0 ClothAnchor_VSlot1",
-    "src/UI/UI_LegacyWidgetSystem.cpp": "Widget_NodeInit Widget_CtorBase Widget_Release Widget_CheckState GridSpring_Create L_YGXPAXIHP6EX0_Z1_Z Cloth_VSlot0",
-    "src/Net/Crypto.cpp": "VerletNode_AddToSystem Cloth_Solve Widget_Ctor SpringMesh_Create FUN_00408ff0 FUN_004090b0 FUN_004091d0",
-    "src/Core/Runtime_Small.cpp": "FUN_00407970 FUN_00407de0 FUN_00407ec0 FUN_00407ea0",
-    "src/Core/Runtime_Medium.cpp": "FUN_00408070",
-    "src/UI/UI_LegacyWidgets.cpp": "FUN_00408680 FUN_0045aaa0_impl",
-    "src/Entity/Entity_LegacyEffects.cpp": "Sound_UpdateChannel3D_Tick",
-    "src/Entity/CharacterCloth.cpp": "ClothNew PrepareMeshClothVertices CharacterCloth_Tick",
-    "src/Render/Render_LegacyBillboards.cpp": "DeleteCloth",
-    "src/Math/Math_3D.cpp": "Vector_Transform BMD_TransformPosition",
+    "src/game/physics/Cloth_Simulation.cpp": "Vec3_Length SpringNode_Delta Cloth_SpringRange Cloth_SpringEqual ClothNode_ApplyForces VerletSystem_Flush SpringNode_ZeroFields SpringNode_SetPos SpringNode_GetPos VerletNode_AddAccel ClothNode_Integrate ClothNode_AddCorrection SpringNode_Ctor VerletNode_SetTarget VerletNode_GetPos VerletNode_ZeroFields VerletNode_CtorBase VerletNode_CtorExt ClothAnchor_Ctor ClothAnchor_SetParams ClothAnchor_Collide Cloth_CollideAnchors Cloth_PinTopRow Cloth_Wind Cloth_Integrate Spring_StoreEdge ClothAnchor_VSlot0 ClothAnchor_VSlot1",
+    "src/ui/UI_LegacyWidgetSystem.cpp": "Widget_NodeInit Widget_CtorBase Widget_Release Widget_CheckState GridSpring_Create L_YGXPAXIHP6EX0_Z1_Z Cloth_VSlot0",
+    "src/net/Crypto.cpp": "VerletNode_AddToSystem Cloth_Solve Widget_Ctor SpringMesh_Create ClothWidget_Render ClothWidget_EmitQuads ClothWidget_EmitVertex",
+    "src/app/core/Runtime_Small.cpp": "ClothNode_SetVTable ClothBody_SetBaseVTable ClothAnchor_Destruct ClothAnchor_ScalarDtor",
+    "src/app/core/Runtime_Medium.cpp": "ClothWidget_Destruct",
+    "src/ui/UI_LegacyWidgets.cpp": "ClothNode_ScalarDtor FUN_0045aaa0_impl",
+    "src/game/entity/Entity_LegacyEffects.cpp": "Sound_UpdateChannel3D_Tick",
+    "src/game/entity/CharacterCloth.cpp": "ClothNew PrepareMeshClothVertices CharacterCloth_Tick",
+    "src/render/Render_LegacyBillboards.cpp": "DeleteCloth",
+    "src/game/math/Math_3D.cpp": "Vector_Transform BMD_TransformPosition",
 }
 
 def function(source,name):
@@ -61,7 +61,7 @@ template<class... T>void Skeleton_Transform(T...){}
 extern "C" const char* Guild_GetMarkName(int){return "guild";}
 char GuildWarName[32]="rival",SoccerTeamName[2][32]={{0},{0}};
 bool EnableSoccer=false;int SceneFlag=5;DWORD MoveSceneFrame;
-uintptr_t DAT_05828d58,DAT_07abf5d8;BYTE DAT_05826d33;
+uintptr_t Models,Hero;BYTE SoccerObserver;
 float DAT_0584621c[15000*4*3];
 float g_BoneScratch[16000],g_AttackEffectMatrix_04D[12],g_AttackEffectMatrix_04D_Alt[12],g_AttackEffectMatrix_04D_Aux[12];
 DWORD DAT_00552508;
@@ -118,7 +118,7 @@ void OwnerReset(){
     std::memset(&owner,0,sizeof(owner));owner.Object.Type=390;owner.Object.Scale=1;owner.Object.EnableBoneMatrix=1;owner.Object.BoneMatrices=bones;owner.GuildMarkIndex=-1;
     for(auto& p:owner.BodyPart)p.Type=-1;
     for(auto& b:bones){std::memset(b,0,sizeof(b));b[0][0]=b[1][1]=b[2][2]=1;b[0][3]=2;b[1][3]=-3;b[2][3]=5;}
-    DAT_05828d58=reinterpret_cast<uintptr_t>(models);DAT_07abf5d8=reinterpret_cast<uintptr_t>(&owner);
+    Models=reinterpret_cast<uintptr_t>(models);Hero=reinterpret_cast<uintptr_t>(&owner);
     for(auto& m:models){m.BodyScale=1;m.BodyOrigin[0]=3;m.BodyOrigin[1]=-2;m.BodyOrigin[2]=1;m.Meshs=reinterpret_cast<BYTE*>(meshes);}
     std::memset(meshes,0,sizeof(meshes));for(auto& m:meshes){m.VertexCount=4;m.TriangleCount=2;m.Vertices=meshVertices;m.Triangles=triangles;}
     for(unsigned i=0;i<4;++i){short bone=short(i%2?18:2);std::memcpy(meshVertices+i*16,&bone,2);}
@@ -127,7 +127,7 @@ void OwnerReset(){
 }
 void Draw(ClothWidget* w){
     std::vector<BYTE> before(reinterpret_cast<BYTE*>(w->Nodes),reinterpret_cast<BYTE*>(w->Nodes)+sizeof(ClothNode)*w->NodeCount);
-    FUN_00408ff0(w);Require(std::memcmp(before.data(),w->Nodes,before.size())==0);
+    ClothWidget_Render(w);Require(std::memcmp(before.data(),w->Nodes,before.size())==0);
 }
 int main(){
     unsigned cases=0;
@@ -197,22 +197,22 @@ int main(){
 
 def harness(revision=None):
     units=[function(read_source(path,revision),name) for path,names in SOURCES.items() for name in names.split()]
-    legacy_abi='float entity,' in function(read_source("src/UI/UI_LegacyWidgetSystem.cpp",revision),"GridSpring_Create")
-    if legacy_abi:units.append(function(read_source("src/Entity/CharacterCloth.cpp",revision),"PtrAsFloatBits"))
+    legacy_abi='float entity,' in function(read_source("src/ui/UI_LegacyWidgetSystem.cpp",revision),"GridSpring_Create")
+    if legacy_abi:units.append(function(read_source("src/game/entity/CharacterCloth.cpp",revision),"PtrAsFloatBits"))
     code="\n".join(units)
-    header=read_source("src/Entity/EntityTypes.h",revision)
+    header=read_source("src/game/entity/EntityTypes.h",revision)
     types="\n#pragma pack(push,1)\n"+"\n".join(record(header,n) for n in ["OBJECT","PART_t","CHARACTER"])+"\n#pragma pack(pop)\n"
     if legacy_abi:
         types=types.replace("BYTE     _unk180[0x30];","BYTE ClothCount; BYTE pad181[3]; void* Cloth; BYTE pad188[40];")
         types=types.replace("BYTE     _unk14[4];","void* Cloth;")
-    model=record(read_source("src/Model/ModelTypes.h",revision),"BMD")
+    model=record(read_source("src/assets/model/ModelTypes.h",revision),"BMD")
     types+="\n#pragma pack(push,1)\n"+model+"\n#pragma pack(pop)\n"
-    types+=re.search(r'class EquipmentModelContext\s*\{.*?\n\};',read_source("src/Render/EquipmentVisuals.h",revision),re.S).group()+"\n"
-    equipment=read_source("src/Render/EquipmentVisuals.cpp",revision)
+    types+=re.search(r'class EquipmentModelContext\s*\{.*?\n\};',read_source("src/render/EquipmentVisuals.h",revision),re.S).group()+"\n"
+    equipment=read_source("src/render/EquipmentVisuals.cpp",revision)
     units.append(re.search(r'EquipmentModelContext::EquipmentModelContext\(.*?\n\}',equipment,re.S).group())
     units.append(re.search(r'EquipmentModelContext::~EquipmentModelContext\(\)[^\n]*',equipment).group())
     code="\n".join(units)
-    cloth=read_source("src/Physics/ClothTypes.h").replace("#pragma once","")
+    cloth=read_source("src/game/physics/ClothTypes.h").replace("#pragma once","")
     declarations="\n".join(u[:u.index("{")].strip()+";" for u in units if not u.startswith('EquipmentModelContext::'))
     globals_h=read_source("src/globals.h",revision);globals_cpp=read_source("src/globals.cpp",revision)
     constants=""
@@ -221,11 +221,11 @@ def harness(revision=None):
         m=re.search(rf'^[^/\n]*\b{name}\s*=\s*[^;]+;',globals_cpp,re.M)
         if not m:raise RuntimeError("Global sin servicio: "+name)
         constants+=m.group()+"\n"
-    presentation=read_source("src/Entity/ClothPresentation.cpp",revision)
+    presentation=read_source("src/game/entity/ClothPresentation.cpp",revision)
     presentation=presentation[presentation.index("namespace {"):]
     decl_presentation="void ClothPresentation_BeginStep();void ClothPresentation_Forget(const void*);void ClothPresentation_Before(void*);void ClothPresentation_After(void*);void ClothPresentation_Vertex(const void*,int,float*);\n"
     tables=""
-    for path,names in [("src/Physics/Cloth_Simulation.cpp",["g_ClothNodeVTable","g_ClothAnchorVTable"]),("src/UI/UI_LegacyWidgetSystem.cpp",["g_ClothVTable"])]:
+    for path,names in [("src/game/physics/Cloth_Simulation.cpp",["g_ClothNodeVTable","g_ClothAnchorVTable"]),("src/ui/UI_LegacyWidgetSystem.cpp",["g_ClothVTable"])]:
         text=read_source(path,revision)
         for name in names:
             tables+=re.search(r'(?:static\s+)?void\s*\*\s*'+name+r'\[[^\]]*\]\s*=\s*\{.*?\};',text,re.S).group()+"\n"

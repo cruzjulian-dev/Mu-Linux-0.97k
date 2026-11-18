@@ -16,6 +16,29 @@ CItemStack::~CItemStack()
 
 }
 
+void CItemStack::SetInfo(const std::vector<ItemExtraDef>& items)
+{
+	this->m_ItemStackInfo.clear();
+
+	for (const ItemExtraDef& d : items)
+	{
+		for (const ItemExtraStack& s : d.Stack)
+		{
+			ITEM_STACK_INFO info;
+
+			info.ItemIndex = SafeGetItem(GET_ITEM(d.Section, d.Index));
+
+			info.Level = s.Level;
+
+			info.MaxStack = s.MaxStack;
+
+			info.CreateItemIndex = (s.CreateSection < 0) ? -1 : SafeGetItem(GET_ITEM(s.CreateSection, s.CreateIndex));
+
+			this->m_ItemStackInfo.push_back(info);
+		}
+	}
+}
+
 void CItemStack::Load(const char* path)
 {
 	CReadScript* lpReadScript = new CReadScript;
@@ -114,40 +137,20 @@ int CItemStack::GetCreateItemIndex(int index)
 	return -1;
 }
 
-void CItemStack::GCItemStackListSend(int aIndex)
+void CItemStack::BuildCatalog(std::vector<ITEM_STACK>& out) const
 {
-	BYTE send[2048];
+	out.clear();
 
-	PMSG_ITEM_STACK_LIST_SEND pMsg;
-
-	pMsg.header.set(0xF3, 0xE3, 0);
-
-	int size = sizeof(pMsg);
-
-	pMsg.count = 0;
-
-	ITEM_STACK info;
-
-	for (std::vector<ITEM_STACK_INFO>::iterator it = this->m_ItemStackInfo.begin(); it != this->m_ItemStackInfo.end(); it++)
+	for (const ITEM_STACK_INFO& it : this->m_ItemStackInfo)
 	{
-		info.ItemIndex = it->ItemIndex;
+		ITEM_STACK info;
 
-		info.Level = it->Level;
+		info.ItemIndex = it.ItemIndex;
 
-		info.MaxStack = it->MaxStack;
+		info.Level = it.Level;
 
-		memcpy(&send[size], &info, sizeof(info));
+		info.MaxStack = it.MaxStack;
 
-		size += sizeof(info);
-
-		pMsg.count++;
+		out.push_back(info);
 	}
-
-	pMsg.header.size[0] = SET_NUMBERHB(size);
-
-	pMsg.header.size[1] = SET_NUMBERLB(size);
-
-	memcpy(send, &pMsg, sizeof(pMsg));
-
-	DataSend(aIndex, send, size);
 }
